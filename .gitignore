@@ -11,3 +11,4 @@ GRAPH_REPORT.md
 .claude/settings.local.json
 .pytest_cache/
 .mcpregistry_*
+LAUNCH_PLAN.md

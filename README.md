@@ -3,25 +3,42 @@
 <!-- mcp-name: io.github.erayerturk/surgical-context-mcp -->
 
 [![PyPI](https://img.shields.io/pypi/v/surgical-context-mcp.svg)](https://pypi.org/project/surgical-context-mcp/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/surgical-context-mcp.svg)](https://pypi.org/project/surgical-context-mcp/)
+[![MCP Registry](https://img.shields.io/badge/MCP%20Registry-io.github.erayerturk%2Fsurgical--context--mcp-8A2BE2.svg)](https://registry.modelcontextprotocol.io/v0/servers?search=surgical-context-mcp)
 [![CI](https://github.com/erayerturk/surgical-context-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/erayerturk/surgical-context-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![MCP Server](https://img.shields.io/badge/MCP-server-8A2BE2.svg)](https://modelcontextprotocol.io)
 [![Claude Code](https://img.shields.io/badge/works%20with-Claude%20Code%20%7C%20Cursor%20%7C%20Windsurf%20%7C%20Cline-orange.svg)](#how-to-use-step-by-step-setup-guide)
 [![GitHub stars](https://img.shields.io/github/stars/erayerturk/surgical-context-mcp?style=social)](https://github.com/erayerturk/surgical-context-mcp/stargazers)
 
 > **Stop feeding 3,000-line files into your LLM context window.**
-> `surgical-context-mcp` is a zero-LLM-cost, embedded SQLite + Tree-sitter Code Knowledge Graph and MCP Server that gives AI coding agents (**Claude Code, Cursor, Windsurf, Cline, Claude Desktop**) the **exact surgical context** they need to edit, refactor, and navigate codebases safely — cutting token consumption by **80–95%** without sacrificing code quality.
+> `surgical-context-mcp` is a zero-LLM-cost, embedded SQLite + Tree-sitter Code Knowledge Graph and MCP Server that gives AI coding agents (**Claude Code, Cursor, Windsurf, Cline, Claude Desktop**) the **exact surgical context** they need to edit, refactor, and navigate codebases safely — cutting token consumption by **70–95%** without sacrificing code quality.
 
 <p align="center">
   <img src="assets/demo.gif" alt="surgical-context-mcp demo: get_edit_context returns ~3.6k tokens instead of a 13k-token full file read" width="900">
   <br><sub>Real run on this repo: editing a function in a 1,264-line file costs <b>~3.7k tokens</b> instead of <b>~13.3k</b> (−72%) — and you still get the skeleton, callers and helpers.</sub>
 </p>
 
+## ⚡ Quick Start (30 seconds)
+
+```bash
+# 1. Install (or: pipx install / pip install surgical-context-mcp)
+uv tool install surgical-context-mcp
+
+# 2. Register with Claude Code
+claude mcp add code-graph -- code-graph serve
+
+# 3. Index your project + install the token-saving guard hook
+code-graph install-hooks /path/to/your/project
+```
+
+That's it — your agent now calls `get_edit_context` instead of reading whole files. Using Cursor, Windsurf, Cline or Claude Desktop? See [Step 1](#step-1-register-the-mcp-server-with-your-ai-coding-tool). Also listed on the [official MCP Registry](https://registry.modelcontextprotocol.io/v0/servers?search=surgical-context-mcp) as `io.github.erayerturk/surgical-context-mcp`.
+
 ---
 
 ## Table of Contents
 
+0. [Quick Start (30 seconds)](#-quick-start-30-seconds)
 1. [Why Use `surgical-context-mcp`?](#why-use-surgical-context-mcp)
 2. [How Much Does It Save & When Should You Use It?](#how-much-does-it-save--when-should-you-use-it)
 3. [Supported Languages & Ecosystem Resolvers](#supported-languages--ecosystem-resolvers)
@@ -176,6 +193,8 @@ Every relationship in `.code_graph.sqlite` is tagged with one of three confidenc
 - macOS, Linux, or Windows
 
 ### Quick Install (recommended)
+
+Published on [PyPI](https://pypi.org/project/surgical-context-mcp/) and the [official MCP Registry](https://registry.modelcontextprotocol.io/v0/servers?search=surgical-context-mcp).
 
 ```bash
 # with uv (fastest)
