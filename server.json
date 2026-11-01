@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.erayerturk/surgical-context-mcp",
+  "description": "Local Tree-sitter code graph: surgical edit context for AI agents instead of full-file reads.",
+  "repository": {
+    "url": "https://github.com/erayerturk/surgical-context-mcp",
+    "source": "github",
+    "id": "1441716118"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "surgical-context-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

@@ -10,3 +10,4 @@ dist/
 GRAPH_REPORT.md
 .claude/settings.local.json
 .pytest_cache/
+.mcpregistry_*
