@@ -2533,7 +2533,7 @@ class ASTAnalyzer:
 
         for idx, raw_line in enumerate(lines, start=1):
             stripped = raw_line.strip()
-            if not stripped or stripped.startswith(("#", "//", "/*", "*")):
+            if not stripped or stripped.startswith(("//", "/*", "*")) or (stripped.startswith("#") and not stripped.startswith("#[")):
                 continue
 
             # Update GDScript/Python `tr("key") % [a, b]` placeholder count on `uses_i18n` edges
@@ -2669,7 +2669,7 @@ class ASTAnalyzer:
         }
         for idx, raw_line in enumerate(lines, start=1):
             stripped = raw_line.strip()
-            if not stripped or stripped.startswith(("#", "//", "/*", "*")):
+            if not stripped or stripped.startswith(("//", "/*", "*")) or (stripped.startswith("#") and not stripped.startswith("#[")):
                 continue
             scope_id = line_to_scope.get(idx, file_node_id)
             code_part = re.sub(r"(?://|#).*$", "", stripped)

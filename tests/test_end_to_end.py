@@ -760,9 +760,246 @@ func test_gm_online_packet() -> void:
         assert "get_symbol_impact" in savings_out
 
 
+def test_5_language_specific_noise_filtering_and_polyglot_contracts() -> None:
+    """
+    Test language-specific noise filtering, lifecycle hooks, serialization contracts, and test runners across all 7 languages:
+      1. Stdlib receiver filtering: Go `strings.TrimSpace` does NOT link to an unrelated `TrimSpace` helper in another file.
+      2. Godot built-in constants (`KEY_ESCAPE`, `MOUSE_BUTTON_LEFT`, `ERR_PARSE_ERROR`) are ignored and don't pollute the graph.
+      3. Coverage scanner language isolation: querying a GDScript function does NOT scan `.go` or `.ts` files for text matches.
+      4. Multi-language lifecycle methods (`ServeHTTP` in Go, `__enter__` in Python, `componentDidMount` in TS, `FixedUpdate` in C#, `drop` in Rust, `afterPropertiesSet` in Java).
+      5. Multi-language serialization & API route contracts:
+         - Rust `#[serde(rename = "session_timeout_sec")]` <-> C# `[JsonPropertyName("session_timeout_sec")]` <-> Java `@JsonProperty("session_timeout_sec")`
+         - Go `"/api/v1/players/:id"` <-> TypeScript `fetch("/api/v1/players/{id}")` via `contract::api::/api/v1/players/{param}`
+      6. Multi-language `tests_for` commands (`pytest`, `npx vitest run`, `cargo test`, `dotnet test --filter`, `mvn test -Dtest=`).
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "go.mod").write_text("module example.com/poly\n\ngo 1.22\n", encoding="utf-8")
+
+        # 1. Go: stdlib `strings.TrimSpace` should NOT link to custom `TrimSpace` in another package,
+        #    Plus `ServeHTTP` lifecycle and `/api/v1/players/:id` API route contract
+        go_api = root / "server" / "api"
+        go_util = root / "server" / "util"
+        go_api.mkdir(parents=True)
+        go_util.mkdir(parents=True)
+
+        (go_util / "text.go").write_text(
+            """package util
+
+func TrimSpace(custom string) string {
+\treturn custom
+}
+""",
+            encoding="utf-8",
+        )
+        (go_api / "handler.go").write_text(
+            """package api
+
+import (
+\t"net/http"
+\t"strings"
+)
+
+func RegisterPlayerRoutes() {
+\thttp.HandleFunc("/api/v1/players/:id", nil)
+}
+
+func ParsePlayerInput(raw string) string {
+\treturn strings.TrimSpace(raw)
+}
+
+func ServeHTTP(w http.ResponseWriter, r *http.Request) {
+\t// ServeHTTP is invoked by net/http runtime
+}
+""",
+            encoding="utf-8",
+        )
+
+        # 2. TypeScript: calls `/api/v1/players/{id}` + `componentDidMount` lifecycle + vitest test
+        ts_dir = root / "web" / "src"
+        ts_dir.mkdir(parents=True)
+        (ts_dir / "player_client.ts").write_text(
+            """export async function fetchPlayerProfile(id: string) {
+  // Mention ServeHTTP and gd_only_inventory_sync in TS comment/string to verify language isolation
+  const unrelatedNote = "gd_only_inventory_sync";
+  return fetch(`/api/v1/players/{id}`);
+}
+
+export class PlayerView {
+  componentDidMount(): void {}
+}
+""",
+            encoding="utf-8",
+        )
+        (ts_dir / "player_client.test.ts").write_text(
+            """import { fetchPlayerProfile } from "./player_client";
+
+export async function test_fetchPlayerProfile() {
+  await fetchPlayerProfile("42");
+}
+""",
+            encoding="utf-8",
+        )
+
+        # 3. GDScript: uses `KEY_ESCAPE`, `MOUSE_BUTTON_LEFT`, and defines `gd_only_inventory_sync`
+        gd_dir = root / "client"
+        gd_dir.mkdir(parents=True)
+        (gd_dir / "inventory.gd").write_text(
+            """extends Node
+
+func gd_only_inventory_sync(key_code: int) -> void:
+\tif key_code == KEY_ESCAPE or key_code == MOUSE_BUTTON_LEFT:
+\t\treturn
+""",
+            encoding="utf-8",
+        )
+
+        # 4. Rust + C# + Java sharing `session_timeout_sec` config contract + tests
+        rs_dir = root / "rust_svc"
+        cs_dir = root / "csharp_svc"
+        java_dir = root / "java_svc"
+        py_dir = root / "py_svc"
+        for d in (rs_dir, cs_dir, java_dir, py_dir):
+            d.mkdir(parents=True)
+
+        (rs_dir / "config.rs").write_text(
+            """pub struct RustConfig {
+    #[serde(rename = "session_timeout_sec")]
+    pub timeout_secs: u32,
+}
+
+pub fn verify_rust_session(c: &RustConfig) -> u32 {
+    c.timeout_secs
+}
+""",
+            encoding="utf-8",
+        )
+        (rs_dir / "test_config.rs").write_text(
+            """#[test]
+pub fn test_verify_rust_session() {
+    let _ = verify_rust_session;
+}
+""",
+            encoding="utf-8",
+        )
+
+        (cs_dir / "SessionConfig.cs").write_text(
+            """public class SessionConfig {
+    [JsonPropertyName("session_timeout_sec")]
+    public int SessionTimeoutSec { get; set; }
+
+    public void FixedUpdate() {}
+
+    public bool ValidateSession(int elapsed) {
+        return elapsed < SessionTimeoutSec;
+    }
+}
+""",
+            encoding="utf-8",
+        )
+        (cs_dir / "SessionConfigTests.cs").write_text(
+            """public class SessionConfigTests {
+    [Fact]
+    public void TestValidateSession() {
+        var s = new SessionConfig();
+        s.ValidateSession(10);
+    }
+}
+""",
+            encoding="utf-8",
+        )
+
+        (java_dir / "AppConfig.java").write_text(
+            """package com.example;
+
+public class AppConfig {
+    @JsonProperty("session_timeout_sec")
+    private int sessionTimeoutSec;
+
+    public void afterPropertiesSet() {}
+
+    public boolean checkTimeout(int v) {
+        return v < sessionTimeoutSec;
+    }
+}
+""",
+            encoding="utf-8",
+        )
+        (java_dir / "AppConfigTest.java").write_text(
+            """package com.example;
+
+public class AppConfigTest {
+    @Test
+    public void testCheckTimeout() {
+        AppConfig cfg = new AppConfig();
+        cfg.checkTimeout(5);
+    }
+}
+""",
+            encoding="utf-8",
+        )
+
+        (py_dir / "ctx.py").write_text(
+            """class ManagedSession:
+    def __enter__(self):
+        return self
+
+    def compute_session_hash(self, token: str) -> str:
+        return token.strip()
+""",
+            encoding="utf-8",
+        )
+        (py_dir / "test_ctx.py").write_text(
+            """from .ctx import ManagedSession
+
+def test_compute_session_hash():
+    s = ManagedSession()
+    assert s.compute_session_hash(" abc ") == "abc"
+""",
+            encoding="utf-8",
+        )
+
+        # Verify 1: Go `strings.TrimSpace` in `ParsePlayerInput` does NOT link to `util.TrimSpace`
+        trim_imp = get_symbol_impact("TrimSpace", project_path=str(root))
+        assert "ParsePlayerInput" not in trim_imp
+
+        # Verify 2: Godot `KEY_ESCAPE` and `MOUSE_BUTTON_LEFT` were NOT indexed as project constants
+        esc_search = search_symbols("KEY_ESCAPE", project_path=str(root))
+        assert "No symbols found" in esc_search
+
+        # Verify 3: Language-isolated coverage scanner: `gd_only_inventory_sync` (GDScript) does NOT report `.ts` file text match!
+        gd_imp = get_symbol_impact("gd_only_inventory_sync", project_path=str(root))
+        assert "player_client.ts" not in gd_imp
+
+        # Verify 4: Multi-language lifecycle methods (`ServeHTTP`, `__enter__`, `componentDidMount`, `FixedUpdate`, `afterPropertiesSet`)
+        for lc_sym in ("ServeHTTP", "__enter__", "componentDidMount", "FixedUpdate", "afterPropertiesSet"):
+            lc_imp = get_symbol_impact(lc_sym, project_path=str(root))
+            assert "Engine Lifecycle Callback" in lc_imp
+
+        # Verify 5A: Multi-language serialization contract (`session_timeout_sec` across Rust, C#, Java)
+        ser_imp = get_symbol_impact("session_timeout_sec", project_path=str(root))
+        assert "contract::config::session_timeout_sec" in ser_imp
+        assert "RustConfig.timeout_secs" in ser_imp
+        assert "SessionConfig.SessionTimeoutSec" in ser_imp
+        assert "AppConfig.sessionTimeoutSec" in ser_imp
+
+        # Verify 5B: Cross-language REST API route contract (`/api/v1/players/:id` in Go <-> `/api/v1/players/{id}` in TS)
+        api_imp = get_symbol_impact("RegisterPlayerRoutes", project_path=str(root))
+        assert "contract::api::/api/v1/players/{param}" in api_imp
+        assert "fetchPlayerProfile" in api_imp
+
+        # Verify 6: Multi-language `tests_for` commands (Python, TS, Rust, C#, Java)
+        assert "pytest py_svc/test_ctx.py -k \"test_compute_session_hash\"" in tests_for("compute_session_hash", project_path=str(root))
+        assert "npx vitest run web/src/player_client.test.ts" in tests_for("fetchPlayerProfile", project_path=str(root))
+        assert "cargo test test_verify_rust_session" in tests_for("verify_rust_session", project_path=str(root))
+        assert 'dotnet test --filter "FullyQualifiedName~TestValidateSession"' in tests_for("ValidateSession", project_path=str(root))
+        assert "mvn test -Dtest=AppConfigTest#testCheckTimeout" in tests_for("checkTimeout", project_path=str(root))
+
+
 if __name__ == "__main__":
     test_1_ignore_and_worktrees()
     test_2_3_4_5_6_godot_go_js_scoping_and_features()
     test_3_universal_polyglot_languages()
     test_4_contracts_data_i18n_tests_diff_concepts_lifecycle_telemetry()
+    test_5_language_specific_noise_filtering_and_polyglot_contracts()
     print("ALL TESTS PASSED SUCCESSFULLY!")

@@ -2,9 +2,8 @@
 
 <!-- mcp-name: io.github.erayerturk/surgical-context-mcp -->
 
-[![PyPI](https://img.shields.io/pypi/v/surgical-context-mcp.svg)](https://pypi.org/project/surgical-context-mcp/)
-[![Total downloads](https://static.pepy.tech/badge/surgical-context-mcp)](https://pepy.tech/project/surgical-context-mcp)
-[![Monthly downloads](https://static.pepy.tech/badge/surgical-context-mcp/month)](https://pepy.tech/project/surgical-context-mcp)
+[![PyPI](https://img.shields.io/pypi/v/surgical-context-mcp?label=PyPI&cacheSeconds=3600)](https://pypi.org/project/surgical-context-mcp/)
+[![Downloads](https://img.shields.io/pepy/dt/surgical-context-mcp?label=downloads&cacheSeconds=3600)](https://pepy.tech/project/surgical-context-mcp)
 [![MCP Registry](https://img.shields.io/badge/MCP%20Registry-io.github.erayerturk%2Fsurgical--context--mcp-8A2BE2.svg)](https://registry.modelcontextprotocol.io/v0/servers?search=surgical-context-mcp)
 [![CI](https://github.com/erayerturk/surgical-context-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/erayerturk/surgical-context-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -149,16 +148,16 @@ By replacing full-file reads with `get_edit_context` (`~2,500–3,500` tokens), 
 
 `surgical-context-mcp` strictly isolates language families (so a method in JavaScript or Go never collides with a method of the same name in Python or GDScript) and parses real ecosystem configuration files to resolve cross-file imports with `exact` confidence:
 
-| Language / Ecosystem | File Extensions | Extracted Skeleton & Symbols | Ecosystem Config & Import Resolution |
+| Language / Ecosystem | File Extensions | Extracted Skeleton & Symbols | Language-Specific Intelligence (Imports, Contracts, Lifecycle & Tests) |
 | :--- | :--- | :--- | :--- |
-| **TypeScript / JavaScript / React** | `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs` | `class`, `interface`, `type`, `enum`, functions, arrow components, React hooks, module `const` | Parses `tsconfig.json` & `jsconfig.json` (`compilerOptions.paths` e.g. `@/* -> src/*`, `baseUrl`) & relative `./` imports |
-| **Python** | `.py` | `class`, `def` / `async def`, `@decorator` event/route links, dataclass/Pydantic fields, `self.attr` in `__init__` | Resolves relative imports (`from .models import ...`) & package paths (`src/...`) |
-| **Go** | `.go` | `package`, `import`, `type ... struct`, `type ... interface`, `const`/`var`, functions & `(r *Recv)` methods | Parses `go.mod` module paths (`module github.com/org/repo`) to link cross-package calls (`pkg.Func()`) |
-| **Rust** | `.rs` | `struct`, `enum`, `trait`, `impl Type`, `fn`, `const`/`static`, `use` declarations | Resolves `crate::...`, `Self::`, and `impl` method calls |
-| **C# (.NET / Unity / Godot)** | `.cs` | `namespace`, `class`, `interface`, `struct`, `enum`, properties, fields, methods, `[Attributes]` | Inheritance chains, event `Invoke` / Unity `SendMessage` detection |
-| **Java** | `.java` | `package`, `class`, `interface`, `enum`, `record`, fields, constructors, methods, `@Annotations` | Package/class import scoping & reflection (`getMethod`) warnings |
-| **Godot 4 (GDScript & Scenes)** | `.gd`, `.tscn`, `project.godot` | `extends`, `class_name`, `signal`, `const`, `enum`, `@export`, `@onready`, `var`, `func` | Parses `project.godot` `[autoload]` singletons, `res://` `preload`/`load` paths, and `.tscn` `[connection signal=...]` |
-| **Data, Seed & Locale Files** | `.json`, `.po` | Seed/map records (`seed/*.json`, `shared/maps/*.json`), config keys, and `locales/*.json` / `.po` translation entries | Links `json:"..."` struct tags & dotted config keys via `contract::config::*`, and links `tr()` / `noticeT()` calls to `i18n::*` keys |
+| **TypeScript / JavaScript / React** | `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs` | `class`, `interface`, `type`, `enum`, functions, arrow components, React hooks, module `const` | `tsconfig.json` / `jsconfig.json` (`paths`, `baseUrl`), React/Vue/Angular/Next.js lifecycle hooks, `/api/...` route contracts, `vitest` / `jest` test commands |
+| **Python** | `.py` | `class`, `def` / `async def`, `@decorator` event/route links, dataclass/Pydantic `Field(alias=...)`, `self.attr` in `__init__` | Relative imports (`from .models import ...`), `__dunder__` & pytest lifecycle hooks, `getattr` warnings, `pytest -k` test commands |
+| **Go** | `.go` | `package`, `import`, `type ... struct`, `type ... interface`, `const`/`var`, functions & `(r *Recv)` methods | `go.mod` cross-package calls, `json:`/`yaml:`/`mapstructure:`/`env:` struct tags, `0x...` opcodes, `ServeHTTP`/`MarshalJSON` lifecycle, stdlib receiver filtering (`strings`, `strconv`, `fmt`), `go test -run` commands |
+| **Rust** | `.rs` | `struct`, `enum`, `trait`, `impl Type`, `fn`, `const`/`static`, `use` declarations | `crate::...` & `impl` resolution, `#[serde(rename = "...")]` field contracts, `Drop`/`Default`/`From` trait hooks, `#[test]` / `cargo test` commands |
+| **C# (.NET / Unity / Godot)** | `.cs` | `namespace`, `class`, `interface`, `struct`, `enum`, properties, fields, methods, `[Attributes]` | `[JsonPropertyName]` / `[JsonProperty]` contracts, Unity (`Awake`, `Update`, `FixedUpdate`, `SendMessage`) & Godot C# (`_Ready`, `_Process`) lifecycle hooks, `dotnet test --filter` commands |
+| **Java** | `.java` | `package`, `class`, `interface`, `enum`, `record`, fields, constructors, methods, `@Annotations` | `@JsonProperty` / `@SerializedName` contracts, Spring/Android/JUnit lifecycle hooks (`afterPropertiesSet`, `onCreate`), `getMethod` warnings, `mvn test` / `./gradlew test` commands |
+| **Godot 4 (GDScript & Scenes)** | `.gd`, `.tscn`, `project.godot` | `extends`, `class_name`, `signal`, `const`, `enum`, `@export`, `@onready`, `var`, `func` | `project.godot` `[autoload]` singletons, `res://` `preload`/`load`, `.tscn` `[connection signal=...]`, engine virtual lifecycle suppression (`_ready`, `_draw`, `_process`), built-in `KEY_*`/`MOUSE_*`/`ERR_*` constant filtering, `godot --headless -s` test commands |
+| **Data, Seed & Locale Files** | `.json`, `.po` | Seed/map records (`seed/*.json`, `shared/maps/*.json`), config keys, and `locales/*.json` / `.po` translation entries | Links struct tags & dotted config keys via `contract::config::*`, and audits `tr()` / `noticeT()` calls against `i18n::*` keys |
 
 ---
 
