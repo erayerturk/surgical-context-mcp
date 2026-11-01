@@ -3,7 +3,8 @@
 <!-- mcp-name: io.github.erayerturk/surgical-context-mcp -->
 
 [![PyPI](https://img.shields.io/pypi/v/surgical-context-mcp.svg)](https://pypi.org/project/surgical-context-mcp/)
-[![PyPI downloads](https://img.shields.io/pypi/dm/surgical-context-mcp.svg)](https://pypi.org/project/surgical-context-mcp/)
+[![Total downloads](https://static.pepy.tech/badge/surgical-context-mcp)](https://pepy.tech/project/surgical-context-mcp)
+[![Monthly downloads](https://static.pepy.tech/badge/surgical-context-mcp/month)](https://pepy.tech/project/surgical-context-mcp)
 [![MCP Registry](https://img.shields.io/badge/MCP%20Registry-io.github.erayerturk%2Fsurgical--context--mcp-8A2BE2.svg)](https://registry.modelcontextprotocol.io/v0/servers?search=surgical-context-mcp)
 [![CI](https://github.com/erayerturk/surgical-context-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/erayerturk/surgical-context-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -79,6 +80,19 @@ That's it — your agent now calls `get_edit_context` instead of reading whole f
   6. **Style Hints & Coverage Warnings** (flags dynamic string calls, `.tscn` connections, templates, and protocol references)
 - **`check_rename_or_delete(symbol)` — One Call Before Any Refactor:**
   Checks AST callers (`exact`/`scoped`), inheritance overrides across parent/child classes, `.tscn`/template connections, signal `emit`/`connect` sites, and workspace-wide dynamic string references.
+- **Cross-Language Contracts (`shares_contract`) — Server ↔ Client ↔ Config in One Call:**
+  - **Protocol Opcodes (`contract::opcode::0xCC`):** Automatically links hex opcode constants across languages (e.g., Go `OpSGMOnline = 0xCC` and GDScript/TypeScript `const S_GM_ONLINE = 0xCC`), so querying either constant shows both server senders and client packet handlers together.
+  - **Config & Schema Keys (`contract::config::<key>`):** Automatically links Go struct `json:"max_chars_per_ip"` field tags, frontend/panel schema strings (`'multi_guard.max_chars_per_ip'`), and `seed/*.json` config entries (`"max_chars_per_ip": 2`) into a single shared contract node.
+- **Data, Seed & Translation (`i18n`) Graph (`check_translations`):**
+  Indexes `seed/*.json`, `shared/maps/*.json`, `locales/*.json`, and `.po` files alongside code. Links `tr("...")` and `noticeT(..., "n.x")` calls to locale definitions and audits missing keys, accidental raw non-key literals, `%d`/`%s`/`{}` placeholder count mismatches, and unused locale keys.
+- **Automated Test Discovery (`tests_for`) & Git Diff Blast Radius (`get_diff_impact`):**
+  - `tests_for(symbol)` identifies every test exercising a symbol and returns the exact runnable CLI command (`go test ./pkg -run '^TestFoo$'`, `godot --headless --path client -s tests/...`, `pytest ... -k ...`).
+  - `get_diff_impact(base_ref="HEAD")` parses `git diff` hunks, maps changed lines to modified AST symbols, and reports their callers, affected cross-language contracts, and runnable test commands in one call — built for code-review subagents (`final-reviewer`).
+- **Concept Search & Engine Lifecycle Noise Suppression:**
+  - Indexes inline/preceding comments and docstrings (`doc_comment`) so searching by concept (e.g. `"attack stat"`) finds `KOAP` (`// attack power stat bonus`).
+  - Recognizes engine-invoked virtual callbacks (`_ready`, `_draw`, `_process`, `_physics_process`, `_input`, `Awake`, `Update`) and suppresses false text-match noise warnings when AST upstream is empty.
+- **Direct Token Savings Telemetry (`get_token_savings`):**
+  Every MCP/CLI query records its returned token count vs. the raw token size of touched files in SQLite (`usage_telemetry`), answering *"How many tokens did `code-graph` save?"* with direct measurements instead of estimates.
 - **Zero LLM Indexing Cost & Sub-Second Speed:**
   Built on native C Tree-sitter grammars and embedded SQLite (`WAL` mode). Indexes **~600 files in `< 0.6` seconds** using `0` API tokens, and automatically refreshes modified files (`mtime` + `SHA-1`) on every query.
 - **Enforced via Claude Code `PreToolUse` Hook:**
@@ -144,6 +158,7 @@ By replacing full-file reads with `get_edit_context` (`~2,500–3,500` tokens), 
 | **C# (.NET / Unity / Godot)** | `.cs` | `namespace`, `class`, `interface`, `struct`, `enum`, properties, fields, methods, `[Attributes]` | Inheritance chains, event `Invoke` / Unity `SendMessage` detection |
 | **Java** | `.java` | `package`, `class`, `interface`, `enum`, `record`, fields, constructors, methods, `@Annotations` | Package/class import scoping & reflection (`getMethod`) warnings |
 | **Godot 4 (GDScript & Scenes)** | `.gd`, `.tscn`, `project.godot` | `extends`, `class_name`, `signal`, `const`, `enum`, `@export`, `@onready`, `var`, `func` | Parses `project.godot` `[autoload]` singletons, `res://` `preload`/`load` paths, and `.tscn` `[connection signal=...]` |
+| **Data, Seed & Locale Files** | `.json`, `.po` | Seed/map records (`seed/*.json`, `shared/maps/*.json`), config keys, and `locales/*.json` / `.po` translation entries | Links `json:"..."` struct tags & dotted config keys via `contract::config::*`, and links `tr()` / `noticeT()` calls to `i18n::*` keys |
 
 ---
 
@@ -384,9 +399,13 @@ All MCP tools have concise `≤ 2`-sentence docstrings to minimize system-prompt
 | **`get_edit_context`** | `symbol`, `budget_tokens=4000`, `project_path=None` | **Call before editing any symbol.** Returns file skeleton, full target body, used members, short same-file callees, `±5L` caller windows, other function signatures, style hints, and coverage warnings within `budget_tokens` (or full file if `<300` lines). |
 | **`get_architecture_map`** | `top_n=15`, `project_path=None` | **Call to understand repo structure.** Returns Subsystem Clusters (directories), God Nodes (highest-centrality production classes/functions), Godot Autoloads, and Top Event/Signal Hubs. |
 | **`check_rename_or_delete`** | `symbol`, `project_path=None` | **Call before deleting, renaming, or changing a signature.** Returns all `exact`/`scoped` call sites, inheritance overrides, `.tscn`/template connections, signal `emit`/`connect` sites, and dynamic string matches. |
-| **`get_symbol_impact`** | `symbol`, `depth=2`, `max_lines=300`, `max_tokens=800`, `include_uncertain=False`, `project_path=None` | Returns upstream callers, downstream callees, event bus connections, and surgical `±5L` read windows up to `depth` hops. |
+| **`get_symbol_impact`** | `symbol`, `depth=2`, `max_lines=300`, `max_tokens=800`, `include_uncertain=False`, `project_path=None` | Returns upstream callers, downstream callees, event bus connections, cross-language contracts (`contract::opcode::*`, `contract::config::*`), and surgical `±5L` read windows up to `depth` hops. |
 | **`find_flow`** | `from_symbol`, `to_symbol`, `max_depth=8`, `project_path=None` | Finds the shortest call/event path between two symbols across functions, methods, and signals/events. |
-| **`search_symbols`** | `query=""`, `kind=None`, `limit=30`, `project_path=None` | Searches AST nodes by name/substring and optional `kind` (`function`, `method`, `class`, `event`). Supports `file.py::Class.method` selectors. |
+| **`search_symbols`** | `query=""`, `kind=None`, `limit=30`, `project_path=None` | Searches AST nodes, data/i18n entries, and inline comments/docstrings (`doc_comment`) by name, substring, or multi-word concept query (`function`, `method`, `class`, `event`, `constant`, `field`, `data`, `i18n`). |
+| **`tests_for`** | `symbol`, `project_path=None` | **Call to find tests for a symbol.** Traverses call/contract graphs and test naming conventions to return all tests exercising `symbol` along with exact runnable CLI commands (`go test -run ...`, `godot --headless -s ...`, `pytest -k ...`). |
+| **`get_diff_impact`** | `base_ref="HEAD"`, `project_path=None` | **Call during code review (`final-reviewer`) or pre-commit.** Parses `git diff` hunks, identifies modified AST symbols, and returns their upstream callers, affected cross-language contracts, and runnable test commands in one report. |
+| **`check_translations`** | `project_path=None` | **Call to audit `i18n` / translation keys.** Links `tr("...")` and `noticeT(..., "n.x")` calls with `.json`/`.po` locale files and reports missing keys (flagging suspicious raw non-key words), `%d`/`%s`/`{}` placeholder count mismatches, and unused keys. |
+| **`get_token_savings`** | `project_path=None`, `reset=False` | **Call to measure exact MCP token savings.** Returns cumulative telemetry comparing returned tokens against raw touched file token sizes across all recorded tool calls. |
 | **`reindex_project`** | `project_path=None`, `force=False` | Runs incremental `mtime` + `SHA-1` indexing (or full re-index if `force=True`) and updates `.code_graph.sqlite`. |
 
 ---
@@ -411,25 +430,37 @@ code-graph edit-context MyClass.my_method -p /path/to/project --budget 4000
 # 5. Check if a symbol is safe to rename, change signature, or delete
 code-graph check my_method -p /path/to/project
 
-# 6. Inspect upstream callers & downstream callees (depth 1..5)
-code-graph impact my_method --depth 2 -p /path/to/project
+# 6. Inspect upstream callers, downstream callees & cross-language contracts (depth 1..5)
+code-graph impact OpSGMOnline --depth 2 -p /path/to/project
 
-# 7. Find shortest call/event path between two symbols
+# 7. Find tests exercising a symbol and get exact runnable commands
+code-graph tests-for BroadcastGMOnline -p /path/to/project
+
+# 8. Analyze git diff blast radius (modified symbols, callers, contracts, runnable tests)
+code-graph diff-impact --base HEAD -p /path/to/project
+
+# 9. Audit translation keys (missing keys, raw non-key literals, %d/%s mismatches, unused keys)
+code-graph i18n -p /path/to/project
+
+# 10. Search symbols, data entries, or concepts (comments/docstrings)
+code-graph search "attack stat" -p /path/to/project
+
+# 11. View measured token savings telemetry
+code-graph savings -p /path/to/project
+
+# 12. Find shortest call/event path between two symbols
 code-graph flow handle_request send_notification -p /path/to/project
 
-# 8. Search symbols by substring and kind (function | method | class | event)
-code-graph search auth --kind method -p /path/to/project
-
-# 9. Print or write the Architecture Map (GRAPH_REPORT.md)
+# 13. Print or write the Architecture Map (GRAPH_REPORT.md)
 code-graph report /path/to/project --write
 
-# 10. Run diagnostics (DB size, language breakdown, top hubs, stale file check)
+# 14. Run diagnostics (DB size, language breakdown, confidence breakdown, token savings)
 code-graph doctor /path/to/project
 
-# 11. Watch directory for live changes and auto-update .code_graph.sqlite
+# 15. Watch directory for live changes and auto-update .code_graph.sqlite
 code-graph watch /path/to/project
 
-# 12. Start the MCP server over stdio
+# 16. Start the MCP server over stdio
 code-graph serve
 ```
 
@@ -450,11 +481,15 @@ Paste this section into your project's `CLAUDE.md`, `AGENTS.md`, or `.cursorrule
    - Do **NOT** read the full file after calling `get_edit_context`; apply your `Edit` directly using the returned line numbers.
 3. **Before Deleting, Renaming, or Changing Signatures (`check_rename_or_delete`):**
    - Always call `check_rename_or_delete(symbol="<name>")` before removing a symbol or changing its signature to verify all `exact`/`scoped` callers, inheritance overrides, scene/template connections, and dynamic string references (`getattr`, `call("x")`).
-4. **Targeted Impact & Flow Queries:**
-   - Use `get_symbol_impact(symbol="<name>", depth=2)` to inspect upstream/downstream call chains.
+4. **Targeted Impact, Cross-Language Contracts & Flow Queries:**
+   - Use `get_symbol_impact(symbol="<name>", depth=2)` to inspect upstream/downstream call chains and cross-language contracts (`OpSGMOnline` <-> `S_GM_ONLINE = 0xCC`, `json:"max_chars_per_ip"` <-> `'multi_guard.max_chars_per_ip'` <-> `seed/*.json`).
    - Use `find_flow(from_symbol="<A>", to_symbol="<B>")` to trace execution or event paths between two symbols.
-   - If a symbol name is ambiguous, pass `path/to/file.ext::SymbolName` or `ClassName.method`.
-5. **No Unbounded Reads on Large Files (>300 Lines):**
+   - Use `search_symbols(query="<concept or name>")` to search code symbols, comments/docstrings (`"attack stat"` -> `KOAP`), `seed/*.json` records, and `locales/*.json` keys together.
+5. **Testing, Translation Audits & Code Review (`tests_for`, `check_translations`, `get_diff_impact`):**
+   - Call `tests_for(symbol="<name>")` instead of guessing test commands (`go test -run ...`, `godot --headless -s ...`).
+   - Call `check_translations()` after touching `tr("...")`, `noticeT(...)`, or `locales/` files to catch missing keys, accidental raw non-key strings, and `%d`/`%s` placeholder mismatches.
+   - For code review (`final-reviewer`), call `get_diff_impact(base_ref="HEAD")` to get modified symbols, affected callers, cross-language contracts, and runnable tests in a single call.
+6. **No Unbounded Reads on Large Files (>300 Lines):**
    - Never call `Read` on a source file >300 lines without `offset` and `limit` (enforced by the `code-graph` `PreToolUse` hook).
 ```
 

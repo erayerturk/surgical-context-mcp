@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -10,12 +11,16 @@ from code_graph.hooks import install_project_hooks_and_report
 from code_graph.indexer import ProjectIndexer
 from code_graph.mcp_server import (
     check_rename_or_delete,
+    check_translations,
     find_flow,
     get_architecture_map,
+    get_diff_impact,
     get_edit_context,
     get_symbol_impact,
+    get_token_savings,
     reindex_project,
     search_symbols,
+    tests_for,
 )
 
 
@@ -524,8 +529,240 @@ public class PaymentGateway {
         assert "PaymentGateway.authorizeCharge" in java_imp
 
 
+def test_4_contracts_data_i18n_tests_diff_concepts_lifecycle_telemetry() -> None:
+    """
+    Test all 8 new workflows:
+      1. Cross-language contracts:
+         - Go `OpSGMOnline = 0xCC` <-> GDScript `const S_GM_ONLINE = 0xCC` via `contract::opcode::0xCC`
+         - Go struct field `json:"max_chars_per_ip"` <-> JS schema `'multi_guard.max_chars_per_ip'` <-> `seed/config.json` `"max_chars_per_ip"`
+      2. Data & locale file indexing (`seed/maps.json`, `locales/tr.json`) searchable alongside code (`"Moradon"`).
+      3. Translation key graph (`check_translations`):
+         - Missing keys & raw non-key literals (`"aday"`, `"oy"`)
+         - Placeholder `%d` / `%s` count mismatches (`noticeT(c, "n.vote_win", one_arg)` when locale has 2 `%s`/`%d`)
+         - Unused locale keys
+      4. `tests_for`: maps `BroadcastGMOnline` / `CalculateTax` to exact runnable `go test -run ...` and `godot -s ...` commands.
+      5. `get_diff_impact`: parses `git diff`, finds modified AST symbols, their callers, cross-language contracts, and runnable tests.
+      6. Concept search: `search_symbols("attack stat")` finds `KOAP` via its inline comment `// attack power stat bonus`.
+      7. Engine virtual lifecycle noise reduction: `get_symbol_impact("_draw")` does not emit false text-match noise warnings.
+      8. Direct token savings telemetry (`get_token_savings`): records returned vs. raw touched file tokens in SQLite.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "go.mod").write_text("module example.com/game\n\ngo 1.22\n", encoding="utf-8")
+
+        server_dir = root / "server" / "game"
+        client_dir = root / "client" / "net"
+        panel_dir = root / "panel"
+        seed_dir = root / "seed"
+        locales_dir = root / "locales"
+        client_tests_dir = root / "client" / "tests"
+        for d in (server_dir, client_dir, panel_dir, seed_dir, locales_dir, client_tests_dir):
+            d.mkdir(parents=True, exist_ok=True)
+        (root / "client" / "project.godot").write_text('[application]\nconfig/name="TestGame"\n', encoding="utf-8")
+
+        # Go server protocol + config + i18n + concept comment
+        (server_dir / "proto.go").write_text(
+            """package game
+
+const (
+\t// OpSGMOnline notifies clients that a GM came online
+\tOpSGMOnline = 0xCC
+\t// attack power stat bonus for warrior class
+\tKOAP = 100
+)
+
+type MultiGuardConfig struct {
+\tMaxCharsPerIP int `json:"max_chars_per_ip"`
+}
+
+func EnforceMultiGuard(cfg MultiGuardConfig, ipCount int) bool {
+\treturn ipCount <= cfg.MaxCharsPerIP
+}
+
+func BroadcastGMOnline(gmName string) byte {
+\tnoticeT(nil, "n.gm_online", gmName)
+\tnoticeT(nil, "aday")
+\tnoticeT(nil, "n.vote_win", gmName)
+\treturn OpSGMOnline
+}
+
+func SpawnInMoradon() string {
+\treturn "Moradon"
+}
+""",
+            encoding="utf-8",
+        )
+
+        # Go test exercising BroadcastGMOnline & EnforceMultiGuard
+        (server_dir / "proto_test.go").write_text(
+            """package game
+
+import "testing"
+
+func TestBroadcastGMOnline(t *testing.T) {
+\top := BroadcastGMOnline("Admin")
+\tif op != OpSGMOnline {
+\t\tt.Fatalf("unexpected opcode: %v", op)
+\t}
+}
+""",
+            encoding="utf-8",
+        )
+
+        # GDScript client handler with matching opcode 0xCC, tr("oy"), and _draw lifecycle method
+        (client_dir / "packet_handler.gd").write_text(
+            """extends Node
+class_name PacketHandler
+
+const S_GM_ONLINE = 0xCC
+
+func handle_packet(opcode: int) -> void:
+\tif opcode == S_GM_ONLINE:
+\t\tvar lbl = tr("oy")
+\t\tvar title = tr("ui.moradon_title")
+\t\tprint(lbl, title)
+
+func _draw() -> void:
+\tpass
+""",
+            encoding="utf-8",
+        )
+
+        # Another GDScript file mentioning `_draw` in comments/strings so text_matches > 0
+        (client_dir / "hud_canvas.gd").write_text(
+            """extends Control
+
+func refresh_hud() -> void:
+\t# calls _draw via engine queue_redraw, _draw is virtual
+\tvar debug_note = "_draw"
+\tprint(debug_note)
+""",
+            encoding="utf-8",
+        )
+
+        # Godot test script exercising handle_packet
+        (client_tests_dir / "test_packets.gd").write_text(
+            """extends Node
+
+func test_gm_online_packet() -> void:
+\tvar h = PacketHandler.new()
+\th.handle_packet(PacketHandler.S_GM_ONLINE)
+""",
+            encoding="utf-8",
+        )
+
+        # Panel JS schema referencing 'multi_guard.max_chars_per_ip'
+        (panel_dir / "schema.js").write_text(
+            """export function renderMultiGuardSetting(form) {
+  return form.getField('multi_guard.max_chars_per_ip');
+}
+""",
+            encoding="utf-8",
+        )
+
+        # Seed JSON data files (`seed/config.json` and `seed/maps.json`)
+        (seed_dir / "config.json").write_text(
+            '{\n  "multi_guard": {\n    "max_chars_per_ip": 2\n  }\n}\n',
+            encoding="utf-8",
+        )
+        (seed_dir / "maps.json").write_text(
+            '{\n  "zones": [\n    {"id": 21, "name": "Moradon", "safe_zone": true}\n  ]\n}\n',
+            encoding="utf-8",
+        )
+
+        # Locale JSON (`locales/tr.json`)
+        (locales_dir / "tr.json").write_text(
+            """{
+  "n.gm_online": "GM %s oyuna girdi!",
+  "n.vote_win": "Aday %s toplam %d oy ile kazandi!",
+  "ui.moradon_title": "Moradon Kalesi",
+  "ui.unused_legacy_key": "Bu anahtar hicbir yerde kullanilmiyor"
+}
+""",
+            encoding="utf-8",
+        )
+
+        # Initialize git repo and commit initial state so we can test `get_diff_impact`
+        subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=root, check=True, capture_output=True)
+        subprocess.run(["git", "add", "."], cwd=root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "initial"], cwd=root, check=True, capture_output=True)
+
+        # 1A. Verify Cross-Language Opcode Contract: Go `OpSGMOnline` <-> GDScript `S_GM_ONLINE` (0xCC)
+        op_impact = get_symbol_impact("OpSGMOnline", project_path=str(root))
+        assert "contract::opcode::0xCC" in op_impact
+        assert "S_GM_ONLINE" in op_impact
+        assert "handle_packet" in op_impact
+        assert "BroadcastGMOnline" in op_impact
+
+        # 1B. Verify Cross-Language Config Contract: Go `MaxCharsPerIP` / `max_chars_per_ip` <-> JS `'multi_guard.max_chars_per_ip'` <-> `seed/config.json`
+        cfg_impact = get_symbol_impact("max_chars_per_ip", project_path=str(root))
+        assert "contract::config::max_chars_per_ip" in cfg_impact
+        assert "MultiGuardConfig.MaxCharsPerIP" in cfg_impact
+        assert "EnforceMultiGuard" in cfg_impact
+        assert "renderMultiGuardSetting" in cfg_impact
+        assert "seed/config.json" in cfg_impact
+
+        # 2. Verify Data & Locale Indexing: searching `"Moradon"` returns Go code, `seed/maps.json`, and `locales/tr.json`
+        moradon_search = search_symbols("Moradon", project_path=str(root))
+        assert "SpawnInMoradon" in moradon_search
+        assert "seed/maps.json" in moradon_search
+        assert "locales/tr.json" in moradon_search
+
+        # 3. Verify Translation Key Graph (`check_translations`)
+        i18n_report = check_translations(project_path=str(root))
+        # Catches suspicious raw non-key literals `"aday"` and `"oy"`
+        assert "`aday`" in i18n_report
+        assert "`oy`" in i18n_report
+        assert "SUSPICIOUS RAW WORD / NOT A KEY" in i18n_report
+        # Catches `%d` / `%s` placeholder count mismatch on `n.vote_win` (1 arg passed vs 2 expected)
+        assert "`n.vote_win`" in i18n_report
+        assert "passes 1 format arg(s)" in i18n_report
+        # Catches unused locale key `ui.unused_legacy_key`
+        assert "`ui.unused_legacy_key`" in i18n_report
+
+        # 4. Verify `tests_for` on Go and GDScript symbols
+        go_tests_out = tests_for("BroadcastGMOnline", project_path=str(root))
+        assert "TestBroadcastGMOnline" in go_tests_out
+        assert "go test ./server/game -run '^TestBroadcastGMOnline$'" in go_tests_out
+
+        gd_tests_out = tests_for("handle_packet", project_path=str(root))
+        assert "test_gm_online_packet" in gd_tests_out
+        assert "godot --headless" in gd_tests_out
+
+        # 5. Verify `get_diff_impact`: modify `BroadcastGMOnline` and check git diff impact
+        (server_dir / "proto.go").write_text(
+            (server_dir / "proto.go")
+            .read_text(encoding="utf-8")
+            .replace('noticeT(nil, "n.gm_online", gmName)', 'noticeT(nil, "n.gm_online", gmName + "!")'),
+            encoding="utf-8",
+        )
+        diff_out = get_diff_impact(project_path=str(root), base_ref="HEAD")
+        assert "BroadcastGMOnline" in diff_out
+        assert "TestBroadcastGMOnline" in diff_out
+        assert "go test ./server/game -run '^TestBroadcastGMOnline$'" in diff_out
+
+        # 6. Verify Concept Search: `"attack stat"` matches `KOAP` via comment `// attack power stat bonus`
+        concept_out = search_symbols("attack stat", project_path=str(root))
+        assert "KOAP" in concept_out
+        assert "attack power stat bonus" in concept_out
+
+        # 7. Verify Engine Lifecycle Noise Suppression (`_draw`)
+        draw_impact = get_symbol_impact("_draw", project_path=str(root))
+        assert "Engine Lifecycle Callback" in draw_impact
+        assert "text matches for `_draw` across project, but AST upstream is empty" not in draw_impact
+
+        # 8. Verify Direct Token Savings Telemetry (`get_token_savings`)
+        savings_out = get_token_savings(project_path=str(root))
+        assert "Token Savings Telemetry" in savings_out
+        assert "Net Tokens Saved" in savings_out
+        assert "get_symbol_impact" in savings_out
+
+
 if __name__ == "__main__":
     test_1_ignore_and_worktrees()
     test_2_3_4_5_6_godot_go_js_scoping_and_features()
     test_3_universal_polyglot_languages()
+    test_4_contracts_data_i18n_tests_diff_concepts_lifecycle_telemetry()
     print("ALL TESTS PASSED SUCCESSFULLY!")

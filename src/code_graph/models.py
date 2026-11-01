@@ -19,13 +19,14 @@ class GraphNode:
     end_line: int
     signature: str  # Compact signature line
     language: str = ""
+    doc_comment: str = ""  # Preceding/inline comment, docstring, or searchable data payload
 
     @property
     def line_count(self) -> int:
         return max(1, self.end_line - self.start_line + 1)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "id": self.id,
             "name": self.name,
             "qualified_name": self.qualified_name,
@@ -36,6 +37,9 @@ class GraphNode:
             "signature": self.signature,
             "language": self.language,
         }
+        if self.doc_comment:
+            d["doc_comment"] = self.doc_comment
+        return d
 
 
 @dataclass(slots=True)

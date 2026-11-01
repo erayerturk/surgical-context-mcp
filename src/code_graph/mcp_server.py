@@ -27,12 +27,22 @@ from .formatter import (
     format_impact_markdown,
 )
 from .indexer import ProjectIndexer
+from .workflows import (
+    append_telemetry_line,
+    build_diff_impact,
+    build_tests_for_symbol,
+    build_translation_report,
+    format_diff_impact_markdown,
+    format_tests_for_markdown,
+    format_token_savings_markdown,
+    format_translation_report_markdown,
+)
 
 mcp = FastMCP(
     "code-graph",
     instructions=(
-        "AST Code Graph. Call `get_architecture_map` first in a new session, `get_edit_context` before editing a symbol, "
-        "`get_symbol_impact` / `find_flow` to explore, and `check_rename_or_delete` before renaming or deleting."
+        "AST & Cross-Language Contract Code Graph. Call `get_architecture_map` first, `get_edit_context` before editing, "
+        "`tests_for` to find runnable tests, `get_diff_impact` to review changes, and `check_rename_or_delete` before refactoring."
     ),
 )
 
@@ -85,7 +95,16 @@ def get_edit_context(
             budget_tokens=budget_tokens,
             refreshed_files=refreshed,
         )
-        return format_edit_context_markdown(ctx)
+        out = format_edit_context_markdown(ctx)
+        cand_files: set[str] = set()
+        if ctx.get("target"):
+            cand_files.add(ctx["target"].get("file", ""))
+        for cw in ctx.get("caller_windows", []):
+            cand_files.add(cw.get("call_site", "").split(":")[0])
+        for ec in ctx.get("external_callees", []):
+            cand_files.add(ec.get("location", "").split(":")[0])
+        indexer.db.record_telemetry("get_edit_context", symbol, out, cand_files)
+        return out
     finally:
         indexer.close()
 
@@ -106,7 +125,10 @@ def check_rename_or_delete(
             symbol=symbol,
             refreshed_files=refreshed,
         )
-        return format_rename_or_delete_markdown(data)
+        out = format_rename_or_delete_markdown(data)
+        cand_files = {d["location"].split(":")[0] for d in data.get("definitions", [])}
+        cand_files.update(c["location"].split(":")[0] for c in data.get("call_sites", []))
+        return append_telemetry_line(indexer.db, "check_rename_or_delete", symbol, out, cand_files)
     finally:
         indexer.close()
 
@@ -120,7 +142,7 @@ def get_symbol_impact(
     output_format: str = "markdown",
     project_path: str | None = None,
 ) -> str:
-    """Get callers, callees, events, coverage warnings, and exact file:line ranges for `symbol` (`name`, `Class.method`, or `file::symbol`)."""
+    """Get callers, callees, cross-language contracts (opcodes/config), events, coverage warnings, and exact file:line ranges for `symbol`."""
     root = _resolve_root(project_path)
     indexer = ProjectIndexer(root)
     try:
@@ -138,7 +160,10 @@ def get_symbol_impact(
             return json.dumps(impact, indent=2, ensure_ascii=False)
         if fmt == "compact":
             return format_impact_compact(impact)
-        return format_impact_markdown(impact)
+        out = format_impact_markdown(impact)
+        cand_files = {f["location"].split(":")[0] for f in impact.get("files_to_read", [])}
+        cand_files.update(d["file"] for d in impact.get("definitions", []) if d.get("file"))
+        return append_telemetry_line(indexer.db, "get_symbol_impact", symbol, out, cand_files)
     finally:
         indexer.close()
 
@@ -165,7 +190,9 @@ def find_flow(
         )
         if output_format.lower() == "json":
             return json.dumps(flow, indent=2, ensure_ascii=False)
-        return format_flow_markdown(flow)
+        out = format_flow_markdown(flow)
+        cand_files = {s["location"].split(":")[0] for s in flow.get("steps", []) if s.get("location")}
+        return append_telemetry_line(indexer.db, "find_flow", f"{from_symbol}->{to_symbol}", out, cand_files)
     finally:
         indexer.close()
 
@@ -177,7 +204,7 @@ def search_symbols(
     limit: int = 25,
     project_path: str | None = None,
 ) -> str:
-    """Search indexed symbols by substring and optional `kind` (`class`, `function`, `method`, `event`)."""
+    """Search symbols, JSON seed/map data, i18n keys, and comments/docstrings by name or concept query (e.g. `'attack stat'`, `'Moradon'`)."""
     root = _resolve_root(project_path)
     indexer = ProjectIndexer(root)
     try:
@@ -188,11 +215,85 @@ def search_symbols(
         if not nodes:
             return f"{fresh}\nNo symbols found matching query='{query}' kind='{kind}'."
         lines = [fresh, f"## Matched Symbols ({len(nodes)})"]
+        cand_files: set[str] = set()
         for n in nodes:
+            cand_files.add(n.file_path)
+            doc_part = f" — *{n.doc_comment[:100]}*" if n.doc_comment else ""
             lines.append(
-                f"- **`{n.qualified_name}`** ({n.kind}) — `{n.file_path}:{n.start_line}-{n.end_line}` ({n.line_count}L) | `{n.signature}`"
+                f"- **`{n.qualified_name}`** ({n.kind}, {n.language}) — `{n.file_path}:{n.start_line}-{n.end_line}` ({n.line_count}L) | `{n.signature}`{doc_part}"
             )
-        return "\n".join(lines)
+        out = "\n".join(lines) + "\n"
+        indexer.db.record_telemetry("search_symbols", query or "*", out, cand_files)
+        return out
+    finally:
+        indexer.close()
+
+
+@mcp.tool()
+def tests_for(
+    symbol: str,
+    project_path: str | None = None,
+) -> str:
+    """Find all tests exercising `symbol` and return the exact runnable CLI commands (`go test -run ...`, `godot -s ...`, `pytest ...`)."""
+    root = _resolve_root(project_path)
+    indexer = ProjectIndexer(root)
+    try:
+        stats = indexer.index(force=False)
+        refreshed = stats.files_indexed + stats.files_removed
+        data = build_tests_for_symbol(indexer.db, symbol=symbol, refreshed_files=refreshed)
+        out = format_tests_for_markdown(data)
+        cand_files = {s["file"] for s in data.get("test_suites", [])}
+        return append_telemetry_line(indexer.db, "tests_for", symbol, out, cand_files)
+    finally:
+        indexer.close()
+
+
+@mcp.tool()
+def get_diff_impact(
+    base_ref: str = "HEAD",
+    project_path: str | None = None,
+) -> str:
+    """Analyze `git diff` changes and return modified symbols, affected callers, cross-language contracts, and runnable test commands."""
+    root = _resolve_root(project_path)
+    indexer = ProjectIndexer(root)
+    try:
+        stats = indexer.index(force=False)
+        refreshed = stats.files_indexed + stats.files_removed
+        data = build_diff_impact(indexer.db, base_ref=base_ref, refreshed_files=refreshed)
+        out = format_diff_impact_markdown(data)
+        cand_files = set(data.get("changed_files", []))
+        return append_telemetry_line(indexer.db, "get_diff_impact", base_ref, out, cand_files)
+    finally:
+        indexer.close()
+
+
+@mcp.tool()
+def check_translations(
+    project_path: str | None = None,
+) -> str:
+    """Validate the i18n graph (`tr(...)`, `noticeT(...)` vs `.json`/`.po` locales) for missing keys, raw non-key strings, placeholder `%d` mismatches, and unused keys."""
+    root = _resolve_root(project_path)
+    indexer = ProjectIndexer(root)
+    try:
+        stats = indexer.index(force=False)
+        refreshed = stats.files_indexed + stats.files_removed
+        rep = build_translation_report(indexer.db, refreshed_files=refreshed)
+        return format_translation_report_markdown(rep)
+    finally:
+        indexer.close()
+
+
+@mcp.tool()
+def get_token_savings(
+    project_path: str | None = None,
+    reset: bool = False,
+) -> str:
+    """Return direct measured token savings (returned tokens vs raw file sizes) across all recorded `code-graph` queries."""
+    root = _resolve_root(project_path)
+    indexer = ProjectIndexer(root)
+    try:
+        summary = indexer.db.get_telemetry_summary(reset=reset)
+        return format_token_savings_markdown(summary)
     finally:
         indexer.close()
 

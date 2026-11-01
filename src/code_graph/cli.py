@@ -25,6 +25,16 @@ from .formatter import (
 from .hooks import install_project_hooks_and_report, run_hook_guard
 from .indexer import ProjectIndexer
 from .mcp_server import run_server
+from .workflows import (
+    append_telemetry_line,
+    build_diff_impact,
+    build_tests_for_symbol,
+    build_translation_report,
+    format_diff_impact_markdown,
+    format_tests_for_markdown,
+    format_token_savings_markdown,
+    format_translation_report_markdown,
+)
 
 
 def _cmd_index(args: argparse.Namespace) -> int:
@@ -197,10 +207,98 @@ def _cmd_search(args: argparse.Namespace) -> int:
             return 1
         print(f"## Symbols matching `{args.query or '*'}` ({len(nodes)})")
         for n in nodes:
+            doc_str = f" — *{n.doc_comment[:100]}*" if getattr(n, "doc_comment", "") else ""
             print(
                 f"- **`{n.qualified_name}`** ({n.kind}) — `{n.file_path}:{n.start_line}-{n.end_line}` ({n.line_count}L)\n"
-                f"  `{n.signature}`"
+                f"  `{n.signature}`{doc_str}"
             )
+        return 0
+    finally:
+        indexer.close()
+
+
+def _cmd_tests_for(args: argparse.Namespace) -> int:
+    target_path = Path(args.path).expanduser().resolve()
+    indexer = ProjectIndexer(target_path)
+    try:
+        stats = indexer.index(force=False)
+        refreshed = stats.files_indexed + stats.files_removed
+        data = build_tests_for_symbol(indexer.db, symbol=args.symbol, refreshed_files=refreshed)
+        if args.json:
+            print(json.dumps(data, indent=2, ensure_ascii=False))
+        else:
+            out = format_tests_for_markdown(data)
+            out = append_telemetry_line(
+                indexer.db,
+                "tests_for",
+                args.symbol,
+                out,
+                data.get("touched_files", []),
+            )
+            print(out, end="")
+        return 0 if data.get("found") else 1
+    finally:
+        indexer.close()
+
+
+def _cmd_diff_impact(args: argparse.Namespace) -> int:
+    target_path = Path(args.path).expanduser().resolve()
+    indexer = ProjectIndexer(target_path)
+    try:
+        stats = indexer.index(force=False)
+        refreshed = stats.files_indexed + stats.files_removed
+        data = build_diff_impact(indexer.db, base_ref=args.base, refreshed_files=refreshed)
+        if args.json:
+            print(json.dumps(data, indent=2, ensure_ascii=False))
+        else:
+            out = format_diff_impact_markdown(data)
+            out = append_telemetry_line(
+                indexer.db,
+                "get_diff_impact",
+                args.base,
+                out,
+                data.get("touched_files", []),
+            )
+            print(out, end="")
+        return 0
+    finally:
+        indexer.close()
+
+
+def _cmd_i18n(args: argparse.Namespace) -> int:
+    target_path = Path(args.path).expanduser().resolve()
+    indexer = ProjectIndexer(target_path)
+    try:
+        stats = indexer.index(force=False)
+        refreshed = stats.files_indexed + stats.files_removed
+        data = build_translation_report(indexer.db, refreshed_files=refreshed)
+        if args.json:
+            print(json.dumps(data, indent=2, ensure_ascii=False))
+        else:
+            out = format_translation_report_markdown(data)
+            out = append_telemetry_line(
+                indexer.db,
+                "check_translations",
+                "*",
+                out,
+                data.get("touched_files", []),
+            )
+            print(out, end="")
+        return 0
+    finally:
+        indexer.close()
+
+
+def _cmd_savings(args: argparse.Namespace) -> int:
+    target_path = Path(args.path).expanduser().resolve()
+    indexer = ProjectIndexer(target_path)
+    try:
+        indexer.index(force=False)
+        summary = indexer.db.get_telemetry_summary(reset=args.reset)
+        if args.json:
+            print(json.dumps(summary, indent=2, ensure_ascii=False))
+        else:
+            print(format_token_savings_markdown(summary), end="")
         return 0
     finally:
         indexer.close()
@@ -347,19 +445,62 @@ def build_parser() -> argparse.ArgumentParser:
     # 9. code-graph search [query]
     p_search = subparsers.add_parser(
         "search",
-        help="Search indexed symbols by name or kind.",
+        help="Search indexed symbols by name, concept/doc_comment, or kind.",
     )
-    p_search.add_argument("query", nargs="?", default="", help="Substring query.")
+    p_search.add_argument("query", nargs="?", default="", help="Substring or concept query.")
     p_search.add_argument(
         "--kind",
         "-k",
-        choices=["class", "function", "method", "event"],
+        choices=["class", "function", "method", "event", "constant", "field", "data", "i18n"],
         default=None,
         help="Filter by symbol kind.",
     )
     p_search.add_argument("--limit", type=int, default=30, help="Max results.")
     p_search.add_argument("--path", "-p", default=".", help="Project root path.")
     p_search.set_defaults(func=_cmd_search)
+
+    # 9b. code-graph tests-for <symbol>
+    for cmd_name in ("tests-for", "tests_for"):
+        p_tests = subparsers.add_parser(
+            cmd_name,
+            help="Find tests exercising <symbol> and output exact runnable test commands.",
+        )
+        p_tests.add_argument("symbol", help="Target symbol (`name`, `Class.method`, or `file::symbol`).")
+        p_tests.add_argument("--path", "-p", default=".", help="Project root path.")
+        p_tests.add_argument("--json", action="store_true", help="Output raw JSON.")
+        p_tests.set_defaults(func=_cmd_tests_for)
+
+    # 9c. code-graph diff-impact [--base HEAD]
+    for cmd_name in ("diff-impact", "get_diff_impact"):
+        p_diff = subparsers.add_parser(
+            cmd_name,
+            help="Analyze git diff hunks, modified symbols, callers, cross-language contracts, and runnable tests.",
+        )
+        p_diff.add_argument("--base", "-b", default="HEAD", help="Git ref to diff against (default: HEAD).")
+        p_diff.add_argument("--path", "-p", default=".", help="Project root path.")
+        p_diff.add_argument("--json", action="store_true", help="Output raw JSON.")
+        p_diff.set_defaults(func=_cmd_diff_impact)
+
+    # 9d. code-graph i18n / translations
+    for cmd_name in ("i18n", "translations", "check_translations"):
+        p_i18n = subparsers.add_parser(
+            cmd_name,
+            help="Audit translation keys: missing keys, raw non-key literals, format placeholder mismatches, and unused keys.",
+        )
+        p_i18n.add_argument("--path", "-p", default=".", help="Project root path.")
+        p_i18n.add_argument("--json", action="store_true", help="Output raw JSON.")
+        p_i18n.set_defaults(func=_cmd_i18n)
+
+    # 9e. code-graph savings
+    for cmd_name in ("savings", "get_token_savings"):
+        p_sav = subparsers.add_parser(
+            cmd_name,
+            help="Show measured token savings telemetry (returned tokens vs raw touched file tokens).",
+        )
+        p_sav.add_argument("--reset", action="store_true", help="Reset telemetry after reading.")
+        p_sav.add_argument("--path", "-p", default=".", help="Project root path.")
+        p_sav.add_argument("--json", action="store_true", help="Output raw JSON.")
+        p_sav.set_defaults(func=_cmd_savings)
 
     # 10. code-graph stats / doctor [path]
     for cmd_name in ("stats", "doctor"):

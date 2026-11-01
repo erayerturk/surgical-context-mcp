@@ -106,11 +106,25 @@ def format_impact_markdown(data: dict[str, Any]) -> str:
                 break
             lines.append(entry)
             shown_up += 1
+    elif cov.get("is_engine_lifecycle"):
+        lines.append(
+            "\n### Upstream\n- Engine lifecycle callback (invoked automatically by the engine runtime)."
+        )
     else:
         total_txt = int(cov.get("total_text_matches", 0))
         lines.append(
             f"\n### Upstream\n- Grafta çağıran bulunamadı; metin taramasında **{total_txt}** eşleşme bulundu."
         )
+
+    # 3b. Cross-Language Contracts (Opcodes `0x...`, Config `json:"..."`, Schema Keys)
+    contracts = data.get("cross_language_contracts", [])
+    if contracts:
+        lines.append("\n### Cross-Language Contracts (Opcode / Config / JSON Schema)")
+        for cc in contracts[:12]:
+            callers_note = f" — used by: {', '.join(cc['callers'])}" if cc.get("callers") else ""
+            lines.append(
+                f"- **`{cc['contract']}`** <-> **`{cc['symbol']}`** ({cc['language']}, `{cc['location']}`) — `{cc['signature']}`{callers_note}"
+            )
 
     # 4. Downstream (Callees / Emitted Events / Listeners)
     downstream = data.get("downstream", [])
@@ -232,5 +246,13 @@ def format_diagnostics_markdown(diag: dict[str, Any]) -> str:
     if autoloads:
         auto_str = ", ".join(f"`{k}` -> `{v}`" for k, v in autoloads.items())
         lines.append(f"- **Godot Autoloads:** {auto_str}")
+
+    telem = diag.get("telemetry", {})
+    if telem and telem.get("total_calls", 0) > 0:
+        lines.append(
+            f"- **Measured Token Savings ({telem['total_calls']} queries):** "
+            f"returned ~{telem['total_returned_tokens']:,} vs raw files ~{telem['total_raw_files_tokens']:,} "
+            f"-> **saved ~{telem['total_saved_tokens']:,} tokens ({telem['overall_savings_percent']}%)**"
+        )
 
     return "\n".join(lines) + "\n"

@@ -46,7 +46,24 @@ EXTENSION_TO_LANGUAGE: dict[str, str] = {
     ".java": "java",
     ".gd": "gdscript",
     ".tscn": "tscn",
+    ".json": "json",
+    ".po": "po",
 }
+
+SKIPPED_JSON_FILENAMES: frozenset[str] = frozenset({
+    "tsconfig.json",
+    "jsconfig.json",
+    "package.json",
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "composer.json",
+    "composer.lock",
+    "settings.json",
+    "settings.local.json",
+    "launch.json",
+    "tasks.json",
+    ".mcp.json",
+})
 
 # Language family groups (edges of type 'calls'/'imports'/'inherits' NEVER cross families)
 LANGUAGE_FAMILY: dict[str, str] = {
@@ -60,7 +77,32 @@ LANGUAGE_FAMILY: dict[str, str] = {
     "java": "jvm",
     "gdscript": "godot",
     "tscn": "godot",
+    "json": "data",
+    "po": "data",
+    "contract": "contract",
 }
+
+I18N_KEY_FIRST_CALLS: frozenset[str] = frozenset({
+    "tr",
+    "tr_n",
+    "i18n",
+    "translate",
+    "T",
+    "Tr",
+})
+
+I18N_CTX_FIRST_CALLS: frozenset[str] = frozenset({
+    "noticeT",
+    "NoticeT",
+    "sendNoticeT",
+    "SendNoticeT",
+    "formatT",
+    "FormatT",
+    "broadcastT",
+    "BroadcastT",
+    "replyT",
+    "ReplyT",
+})
 
 # Method/function names recognized as publishing/emitting events
 PUBLISH_METHODS: frozenset[str] = frozenset({
@@ -197,6 +239,147 @@ IGNORED_CALLS: frozenset[str] = frozenset({
     "get_vector", "get_axis", "get_mouse_position", "get_global_mouse_position",
     "set_mouse_mode", "set_input_as_handled",
 })
+
+# Language-specific standard library modules, engine singletons, and built-in objects
+# Calls on these receivers (when not aliased to a project file) are filtered out to prevent false cross-file edges and noise
+LANGUAGE_STDLIB_RECEIVERS: dict[str, frozenset[str]] = {
+    "go": frozenset({
+        "fmt", "strings", "strconv", "bytes", "bufio", "os", "io", "fs", "filepath", "path",
+        "time", "math", "rand", "cmplx", "sync", "atomic", "context", "errors", "sort", "slices",
+        "maps", "reflect", "regexp", "runtime", "debug", "net", "http", "url", "tls", "json",
+        "xml", "csv", "gob", "hex", "base64", "binary", "utf8", "unicode", "log", "slog", "flag",
+        "testing", "sql", "exec", "signal", "syscall", "unsafe", "hash", "sha1", "sha256", "md5",
+        "hmac", "cipher", "aes", "rsa", "gzip", "zlib", "tar", "zip", "html", "template", "t", "b",
+    }),
+    "python": frozenset({
+        "os", "sys", "re", "json", "time", "datetime", "math", "random", "logging", "logger", "log",
+        "pathlib", "Path", "shutil", "subprocess", "itertools", "functools", "collections", "typing",
+        "asyncio", "unittest", "pytest", "hashlib", "base64", "uuid", "copy", "io", "csv", "sqlite3",
+        "urllib", "http", "socket", "struct", "enum", "dataclasses", "abc", "contextlib", "inspect",
+        "traceback", "warnings", "gc", "platform", "stat", "glob", "fnmatch", "tempfile", "argparse",
+    }),
+    "javascript": frozenset({
+        "Math", "JSON", "Object", "Array", "String", "Number", "Boolean", "Symbol", "BigInt",
+        "Promise", "Date", "RegExp", "Reflect", "Proxy", "Intl", "Error", "TypeError", "RangeError",
+        "Map", "Set", "WeakMap", "WeakSet", "ArrayBuffer", "DataView", "Uint8Array", "Int32Array",
+        "Float64Array", "console", "window", "document", "navigator", "location", "history",
+        "localStorage", "sessionStorage", "performance", "crypto", "URL", "URLSearchParams",
+        "FormData", "Headers", "Request", "Response", "AbortController", "TextEncoder", "TextDecoder",
+        "process", "Buffer", "fs", "path", "os", "util", "stream", "zlib", "child_process", "React", "ReactDOM",
+    }),
+    "gdscript": frozenset({
+        "Input", "Time", "OS", "Engine", "ProjectSettings", "ResourceLoader", "ResourceSaver",
+        "FileAccess", "DirAccess", "DisplayServer", "RenderingServer", "AudioServer", "TranslationServer",
+        "PhysicsServer2D", "PhysicsServer3D", "NavigationServer2D", "NavigationServer3D", "XRServer",
+        "CameraServer", "ThemeDB", "ClassDB", "Marshalls", "JSON", "RegEx", "Crypto", "HashingContext",
+        "AESContext", "TLSOptions", "IP", "WorkerThreadPool", "JavaScriptBridge", "Geometry2D",
+        "Geometry3D", "ResourceUID", "GD", "Color", "Vector2", "Vector2i", "Vector3", "Vector3i",
+        "Vector4", "Rect2", "Transform2D", "Transform3D", "Basis", "Quaternion", "Plane", "AABB",
+        "RID", "Callable", "Signal", "String", "Array", "Dictionary", "PackedByteArray", "PackedStringArray",
+    }),
+    "rust": frozenset({
+        "std", "core", "alloc", "Vec", "String", "str", "Option", "Result", "Box", "Rc", "Arc",
+        "Cell", "RefCell", "Mutex", "RwLock", "HashMap", "HashSet", "BTreeMap", "BTreeSet", "VecDeque",
+        "Path", "PathBuf", "File", "OpenOptions", "Command", "Instant", "Duration", "SystemTime",
+        "env", "fs", "io", "mem", "ptr", "slice", "iter", "fmt", "thread", "sync", "time", "process",
+        "tokio", "serde", "serde_json", "tracing", "log",
+    }),
+    "csharp": frozenset({
+        "System", "Console", "Math", "MathF", "Mathf", "Convert", "BitConverter", "String", "Guid",
+        "DateTime", "DateTimeOffset", "TimeSpan", "Task", "ValueTask", "Thread", "Interlocked",
+        "Monitor", "SemaphoreSlim", "CancellationTokenSource", "Enumerable", "Queryable", "Array",
+        "List", "Dictionary", "HashSet", "File", "Directory", "Path", "Stream", "MemoryStream",
+        "JsonSerializer", "JsonUtility", "Regex", "Encoding", "Debug", "Time", "Input", "Physics",
+        "Physics2D", "GameObject", "Object", "Component", "Transform", "Vector2", "Vector3", "Vector4",
+        "Quaternion", "Color", "Rect", "Bounds", "Ray", "Gizmos", "Handles", "Application",
+        "SceneManager", "PlayerPrefs", "Resources", "Shader", "Material", "AudioSource", "Animator", "GD",
+    }),
+    "java": frozenset({
+        "System", "Math", "StrictMath", "Objects", "Collections", "Arrays", "Optional", "Stream",
+        "IntStream", "LongStream", "DoubleStream", "Collectors", "Files", "Paths", "Path", "String",
+        "StringBuilder", "Integer", "Long", "Double", "Float", "Boolean", "Byte", "Short", "Character",
+        "BigInteger", "BigDecimal", "Thread", "CompletableFuture", "Executors", "TimeUnit", "UUID",
+        "Instant", "Duration", "Period", "LocalDate", "LocalTime", "LocalDateTime", "ZonedDateTime",
+        "DateTimeFormatter", "Pattern", "Matcher", "Logger", "LoggerFactory", "log", "logger",
+        "Assertions", "Assert",
+    }),
+}
+LANGUAGE_STDLIB_RECEIVERS["typescript"] = LANGUAGE_STDLIB_RECEIVERS["javascript"]
+LANGUAGE_STDLIB_RECEIVERS["tsx"] = LANGUAGE_STDLIB_RECEIVERS["javascript"]
+
+# Language-specific noisy helper/assertion/framework method names to ignore per language
+LANGUAGE_IGNORED_CALLS: dict[str, frozenset[str]] = {
+    "go": frozenset({
+        "Errorf", "Fatalf", "Logf", "Helper", "Parallel", "Skip", "Skipf", "Fail", "FailNow",
+        "Cleanup", "TempDir", "Setenv", "Run", "WriteHeader", "Header", "Context", "WithCancel",
+        "WithTimeout", "WithDeadline", "WithValue", "Background", "TODO", "Sprintf", "Fprintf",
+        "Println", "Printf", "TrimSpace", "TrimPrefix", "TrimSuffix", "HasPrefix", "HasSuffix",
+        "Contains", "Split", "Join", "ReplaceAll", "ToLower", "ToUpper", "Atoi", "Itoa",
+        "ParseInt", "ParseFloat", "ParseBool", "FormatInt", "ReadAll", "ReadFile", "WriteFile",
+        "Stat", "MkdirAll", "RemoveAll", "Now", "Since", "Until", "Sleep", "After", "NewTicker",
+    }),
+    "python": frozenset({
+        "info", "debug", "warning", "error", "critical", "exception", "getLogger",
+        "dumps", "loads", "dump", "load", "compile", "findall", "finditer", "sub",
+        "getenv", "makedirs", "walk", "isdir", "isfile", "abspath", "dirname", "basename",
+        "dataclass", "field", "Field",
+    }),
+    "javascript": frozenset({
+        "then", "catch", "finally", "bind", "call", "apply", "freeze", "seal", "create",
+        "defineProperty", "hasOwnProperty", "isPrototypeOf", "getItem", "setItem", "removeItem",
+        "addEventListener", "removeEventListener", "dispatchEvent", "requestAnimationFrame",
+        "cancelAnimationFrame", "encodeURIComponent", "decodeURIComponent", "atob", "btoa",
+        "describe", "it", "test", "expect", "beforeEach", "afterEach", "beforeAll", "afterAll", "vi", "jest",
+    }),
+    "rust": frozenset({
+        "new", "default", "with_capacity", "len", "is_empty", "push", "pop", "insert", "remove",
+        "get", "get_mut", "contains", "contains_key", "entry", "or_insert", "or_insert_with",
+        "or_default", "map", "and_then", "or_else", "map_err", "ok_or", "ok_or_else", " filter",
+        "filter_map", "flat_map", "fold", "enumerate", "zip", "take", "skip", "chain", "cloned",
+        "copied", "chars", "bytes", "lines", "trim", "starts_with", "ends_with", "parse",
+        "read_to_string", "write_all", "flush", "spawn", "block_on", "sleep",
+    }),
+    "csharp": frozenset({
+        "Log", "LogWarning", "LogError", "LogException", "GetComponent", "GetComponents",
+        "GetComponentInChildren", "GetComponentInParent", "TryGetComponent", "AddComponent",
+        "Instantiate", "Destroy", "DestroyImmediate", "DontDestroyOnLoad", "FindObjectOfType",
+        "FindObjectsOfType", "CompareTag", "SetActive", "StartCoroutine", "StopCoroutine",
+        "StopAllCoroutines", "Where", "Select", "FirstOrDefault", "SingleOrDefault", "Any", "All",
+        "ToList", "ToArray", "ToDictionary", "OrderBy", "OrderByDescending", "GroupBy", "Count",
+        "ConfigureAwait", "WhenAll", "WhenAny", "Delay", "FromResult", "IsNullOrEmpty", "IsNullOrWhiteSpace",
+    }),
+    "java": frozenset({
+        "of", "ofNullable", "empty", "isPresent", "isEmpty", "ifPresent", "orElse", "orElseGet",
+        "orElseThrow", "stream", "parallelStream", "collect", "toList", "toSet", "toMap",
+        "forEach", "filter", "map", "flatMap", "reduce", "findFirst", "findAny", "anyMatch",
+        "allMatch", "noneMatch", "count", "sorted", "distinct", "limit", "skip", "builder",
+        "build", "getLogger", "info", "debug", "warn", "error", "trace", "assertEquals",
+        "assertTrue", "assertFalse", "assertNotNull", "assertNull", "assertThrows",
+    }),
+    "gdscript": frozenset({
+        "is_editor_hint", "get_frames_per_second", "get_main_loop", "get_version_info",
+    }),
+}
+LANGUAGE_IGNORED_CALLS["typescript"] = LANGUAGE_IGNORED_CALLS["javascript"]
+LANGUAGE_IGNORED_CALLS["tsx"] = LANGUAGE_IGNORED_CALLS["javascript"]
+
+COMMON_IGNORED_CONSTANTS: frozenset[str] = frozenset({
+    "TRUE", "FALSE", "NULL", "NONE", "NIL", "NAN", "INF", "INFINITY", "PI", "TAU", "EOF",
+    "OK", "ERR", "TODO", "FIXME", "NOTE", "HACK", "XXX", "HTTP", "HTTPS", "UTF8", "ASCII",
+    "JSON", "HTML", "XML", "CSV", "SQL", "UUID", "URL", "URI", "API", "TCP", "UDP", "TLS",
+    "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS",
+    "DEBUG", "INFO", "WARN", "WARNING", "ERROR", "FATAL", "CRITICAL", "TRACE",
+    "TYPE_CHECKING", "SIGINT", "SIGTERM", "SIGKILL",
+})
+
+GODOT_BUILTIN_CONST_PREFIXES: tuple[str, ...] = (
+    "KEY_", "MOUSE_", "JOY_", "MIDI_", "NOTIFICATION_", "ERR_", "PROPERTY_", "METHOD_",
+    "CONNECT_", "PROCESS_MODE_", "PAUSE_MODE_", "SIZE_", "PRESET_", "ANCHOR_", "GROW_",
+    "ALIGNMENT_", "HORIZONTAL_ALIGNMENT_", "VERTICAL_ALIGNMENT_", "AUTOWRAP_", "TEXTURE_",
+    "BLEND_", "COLLISION_", "BODY_MODE_", "TRANS_", "EASE_", "LOOP_", "TYPE_", "CORNER_",
+    "SIDE_", "MARGIN_", "CLOCKWISE", "COUNTERCLOCKWISE", "INLINE_ALIGNMENT_", "CURSOR_",
+    "WINDOW_MODE_", "DISPLAY_SERVER_", "RENDERING_", "AUDIO_",
+)
 
 
 def _make_parser(lang: Language) -> Parser:
@@ -434,12 +617,23 @@ class ASTAnalyzer:
             )
         )
 
+        source_text = source_bytes.decode("utf-8", errors="replace")
+
+        if lang == "json":
+            self._parse_json_file(source_text, rel_path, file_node_id, result)
+            return result
+
+        if lang == "po":
+            self._parse_po_file(source_text, rel_path, file_node_id, result)
+            return result
+
         if lang == "gdscript":
-            self._parse_gdscript(source_bytes.decode("utf-8", errors="replace"), rel_path, file_node_id, result)
+            self._parse_gdscript(source_text, rel_path, file_node_id, result)
+            self._enrich_comments_and_contracts(source_text, rel_path, lang, file_node_id, result)
             return result
 
         if lang == "tscn":
-            self._parse_tscn(source_bytes.decode("utf-8", errors="replace"), rel_path, file_node_id, result)
+            self._parse_tscn(source_text, rel_path, file_node_id, result)
             return result
 
         parser = self._parsers.get(lang)
@@ -462,6 +656,7 @@ class ASTAnalyzer:
         elif lang == "java":
             self._walk_java(root, source_bytes, rel_path, file_node_id, result)
 
+        self._enrich_comments_and_contracts(source_text, rel_path, lang, file_node_id, result)
         return result
 
     # -------------------------------------------------------------------------
@@ -651,7 +846,59 @@ class ASTAnalyzer:
             if event_name and re.match(r"^[A-Za-z0-9_:.-]+$", event_name):
                 self._ensure_event_node(event_name, rel_path, line, result)
 
-        # 4. Regular function/method call
+        # 3b. Translation / i18n calls (`tr("key")`, `noticeT(client, "n.x", a, b)`, `i18n.T(...)`)
+        if (callee_short in I18N_KEY_FIRST_CALLS or callee_short in I18N_CTX_FIRST_CALLS) and args_texts:
+            key_idx = -1
+            if callee_short in I18N_KEY_FIRST_CALLS:
+                if args_texts[0].strip().startswith(('"', "'", "`")):
+                    key_idx = 0
+            else:
+                for idx_a, raw_a in enumerate(args_texts[:3]):
+                    if raw_a.strip().startswith(('"', "'", "`")):
+                        key_idx = idx_a
+                        break
+            if key_idx >= 0:
+                i18n_key = self._clean_string_literal(args_texts[key_idx])
+                if i18n_key and len(i18n_key) <= 100:
+                    fmt_args_count = max(0, len(args_texts) - (key_idx + 1))
+                    i18n_node_id = f"i18n::{i18n_key}"
+                    if not any(n.id == i18n_node_id for n in result.nodes):
+                        result.nodes.append(
+                            GraphNode(
+                                id=i18n_node_id,
+                                name=i18n_key,
+                                qualified_name=f"i18n::{i18n_key}",
+                                kind="i18n",
+                                file_path=rel_path,
+                                start_line=line,
+                                end_line=line,
+                                signature=f"i18n key '{i18n_key}'",
+                                language="i18n",
+                            )
+                        )
+                    result.edges.append(
+                        GraphEdge(
+                            source_id=scope_id,
+                            target_name=i18n_key,
+                            receiver=f"args:{fmt_args_count}",
+                            target_id=i18n_node_id,
+                            edge_type="uses_i18n",
+                            file_path=rel_path,
+                            line=line,
+                            confidence="exact",
+                        )
+                    )
+
+        # 4. Regular function/method call (with language-specific stdlib/builtin filtering)
+        lang = result.language
+        if callee_short in LANGUAGE_IGNORED_CALLS.get(lang, ()) or callee_full in LANGUAGE_IGNORED_CALLS.get(lang, ()):
+            return
+
+        if receiver_name and receiver_name not in result.aliases:
+            recv_root = receiver_name.split(".")[0].split("::")[0].lstrip("$%@&*")
+            if recv_root in LANGUAGE_STDLIB_RECEIVERS.get(lang, ()):
+                return
+
         resolved_receiver = result.aliases.get(receiver_name, receiver_name)
         result.edges.append(
             GraphEdge(
@@ -2094,3 +2341,708 @@ class ASTAnalyzer:
                                 confidence="exact",
                             )
                         )
+
+    # -------------------------------------------------------------------------
+    # Cross-Language Contracts, Comments/Docstrings & Data/Locale Indexing
+    # -------------------------------------------------------------------------
+
+    def _ensure_contract_node(
+        self,
+        contract_kind: str,
+        key: str,
+        rel_path: str,
+        line: int,
+        result: ParseResult,
+        doc: str = "",
+    ) -> str:
+        cid = f"contract::{contract_kind}::{key}"
+        if not any(n.id == cid for n in result.nodes):
+            result.nodes.append(
+                GraphNode(
+                    id=cid,
+                    name=key,
+                    qualified_name=cid,
+                    kind="contract",
+                    file_path=rel_path,
+                    start_line=line,
+                    end_line=line,
+                    signature=f"contract {contract_kind}::{key}",
+                    language="contract",
+                    doc_comment=doc,
+                )
+            )
+        return cid
+
+    @staticmethod
+    def _count_format_placeholders(text: str) -> int:
+        if not text:
+            return 0
+        # Matches printf-style (%s, %d, %v, %.2f, %1$s) and brace-style ({0}, {name}, {})
+        matches = re.findall(r"%(?!%)(?:\(\w+\)|\d+\$)?[-+#0 ]*\d*(?:\.\d+)?[sdvfxXobq]|{[0-9a-zA-Z_]*}", text)
+        return len(matches)
+
+    def _enrich_comments_and_contracts(
+        self,
+        source_text: str,
+        rel_path: str,
+        lang: str,
+        file_node_id: str,
+        result: ParseResult,
+    ) -> None:
+        """
+        Universal post-pass on code files to extract:
+          1. Preceding/inline comments, docstrings, and notable string literals into `node.doc_comment` (for concept search).
+          2. Constants & cross-language hex opcodes (`OpSGMOnline = 0xCC` <-> `contract::opcode::0xCC` <-> `S_GM_ONLINE = 0xCC`).
+          3. Go struct `json:"max_chars_per_ip"` tags, field accesses, and JS/TS/GDScript `'multi_guard.max_chars_per_ip'` config contracts.
+          4. GDScript/Python `tr("key") % [a, b]` placeholder argument counts.
+        """
+        lines = source_text.splitlines()
+        if not lines:
+            return
+
+        # Build line -> innermost scope node ID map & track function body lines
+        line_to_scope: dict[int, str] = {}
+        func_body_lines: set[int] = set()
+        class_nodes: list[GraphNode] = []
+
+        for n in result.nodes:
+            if n.kind == "class":
+                class_nodes.append(n)
+            elif n.kind in ("function", "method"):
+                for ln in range(n.start_line, min(len(lines), n.end_line) + 1):
+                    line_to_scope[ln] = n.id
+                    if ln > n.start_line:
+                        func_body_lines.add(ln)
+
+        def enclosing_class_at(ln: int) -> GraphNode | None:
+            best: GraphNode | None = None
+            for cn in class_nodes:
+                if cn.start_line <= ln <= cn.end_line and not cn.signature.startswith("script "):
+                    best = cn
+            return best
+
+        def extract_comment_for_line(ln: int) -> str:
+            parts: list[str] = []
+            # Check up to 4 preceding lines for contiguous comments
+            k = ln - 2
+            prec: list[str] = []
+            while k >= 0 and len(prec) < 4:
+                s = lines[k].strip()
+                if s.startswith(("#", "//", "///", "/*", "*")) and not s.startswith("#!"):
+                    cleaned = s.lstrip("#/* \t").rstrip("*/ \t")
+                    if cleaned:
+                        prec.append(cleaned)
+                    k -= 1
+                else:
+                    break
+            prec.reverse()
+            parts.extend(prec)
+
+            # Inline comment on line `ln`
+            if 1 <= ln <= len(lines):
+                raw_l = lines[ln - 1]
+                m_in = re.search(r"(?://|#)\s*(.+)$", raw_l)
+                if m_in:
+                    parts.append(m_in.group(1).strip())
+
+            # Docstring on line `ln + 1` (Python/GDScript)
+            if ln < len(lines):
+                nxt = lines[ln].strip()
+                if nxt.startswith(('"""', "'''")):
+                    doc_chunk = nxt.strip("\"' ")
+                    if not doc_chunk and ln + 1 < len(lines):
+                        doc_chunk = lines[ln + 1].strip().strip("\"' ")
+                    if doc_chunk:
+                        parts.append(doc_chunk)
+            return " | ".join(p for p in parts if p)[:260]
+
+        # 1. Enrich existing nodes with comments/docstrings + notable string literals inside functions
+        existing_node_ids: set[str] = {n.id for n in result.nodes}
+        for n in result.nodes:
+            if n.kind in ("file", "event", "contract", "i18n"):
+                continue
+            c_txt = extract_comment_for_line(n.start_line)
+            if n.kind in ("function", "method"):
+                body_slice = "\n".join(lines[max(0, n.start_line - 1) : min(len(lines), n.end_line)])
+                str_lits = re.findall(r'["\']([A-Za-z0-9_.\- ]{3,40})["\']', body_slice)
+                if str_lits:
+                    uniq_s = list(dict.fromkeys(str_lits))[:8]
+                    c_txt = f"{c_txt} [literals: {', '.join(uniq_s)}]".strip()
+            if c_txt:
+                n.doc_comment = c_txt[:300]
+
+        # 2. Extract Constants, Cross-Language Opcode Contracts (`0xCC`), & Multi-Language Serialization Field Tags
+        file_constants: dict[str, str] = {}  # const_name -> node_id
+        go_field_to_json: dict[str, str] = {}  # GoFieldName -> json_key
+        pending_serde_key: str | None = None
+
+        def is_ignored_const(name: str) -> bool:
+            if name in COMMON_IGNORED_CONSTANTS:
+                return True
+            if lang == "gdscript" and name.startswith(GODOT_BUILTIN_CONST_PREFIXES):
+                return True
+            return False
+
+        def register_serialized_field(field_name: str, field_sig: str, ser_key: str, ln: int) -> None:
+            if not ser_key or ser_key == "-":
+                return
+            go_field_to_json[field_name] = ser_key
+            enc_cls = enclosing_class_at(ln)
+            struct_name = enc_cls.name if enc_cls else Path(rel_path).stem
+            field_node_id = f"{rel_path}::{struct_name}.{field_name}"
+            c_doc = extract_comment_for_line(ln)
+            if field_node_id not in existing_node_ids:
+                existing_node_ids.add(field_node_id)
+                result.nodes.append(
+                    GraphNode(
+                        id=field_node_id,
+                        name=field_name,
+                        qualified_name=f"{struct_name}.{field_name}",
+                        kind="field",
+                        file_path=rel_path,
+                        start_line=ln,
+                        end_line=ln,
+                        signature=field_sig[:140],
+                        language=lang,
+                        doc_comment=f"json:{ser_key} {c_doc}".strip(),
+                    )
+                )
+            cid = self._ensure_contract_node("config", ser_key, rel_path, ln, result, doc=f"{lang} field {struct_name}.{field_name}")
+            result.edges.append(
+                GraphEdge(
+                    source_id=field_node_id,
+                    target_name=ser_key,
+                    target_id=cid,
+                    edge_type="shares_contract",
+                    file_path=rel_path,
+                    line=ln,
+                    confidence="exact",
+                )
+            )
+            result.edges.append(
+                GraphEdge(
+                    source_id=cid,
+                    target_name=f"{struct_name}.{field_name}",
+                    target_id=field_node_id,
+                    edge_type="shares_contract",
+                    file_path=rel_path,
+                    line=ln,
+                    confidence="exact",
+                )
+            )
+
+        for idx, raw_line in enumerate(lines, start=1):
+            stripped = raw_line.strip()
+            if not stripped or stripped.startswith(("#", "//", "/*", "*")):
+                continue
+
+            # Update GDScript/Python `tr("key") % [a, b]` placeholder count on `uses_i18n` edges
+            if "%" in stripped and ("tr(" in stripped or "tr_n(" in stripped):
+                m_tr_mod = re.search(r'\btr(?:_n)?\s*\(\s*["\']([^"\']+)["\']\s*\)\s*%\s*(\[[^\]]*\]|[^\s,)]+)', stripped)
+                if m_tr_mod:
+                    t_key = m_tr_mod.group(1)
+                    rhs_mod = m_tr_mod.group(2).strip()
+                    arg_cnt = rhs_mod.count(",") + 1 if rhs_mod.startswith("[") and rhs_mod != "[]" else 1
+                    for e in result.edges:
+                        if e.edge_type == "uses_i18n" and e.line == idx and e.target_name == t_key:
+                            e.receiver = f"args:{arg_cnt}"
+
+            # A1) Go struct field with `json:"..."` / `yaml:"..."` / `toml:"..."` / `mapstructure:"..."` / `env:"..."` tag
+            if lang == "go" and "`" in stripped:
+                m_go_tag = re.match(
+                    r"^([A-Z][A-Za-z0-9_]*)\s+([^`]+)`[^`]*(?:json|yaml|toml|mapstructure|env):\"([a-zA-Z0-9_.-]+)(?:,[^\"]*)?\"",
+                    stripped,
+                )
+                if m_go_tag:
+                    f_name, f_type, j_key = m_go_tag.group(1), m_go_tag.group(2).strip(), m_go_tag.group(3)
+                    register_serialized_field(f_name, f'{f_name} {f_type} `json:"{j_key}"`', j_key, idx)
+
+            # A2) Rust `#[serde(rename = "...")]`, C# `[JsonPropertyName("...")]` / `[JsonProperty("...")]`, Java `@JsonProperty("...")` / `@SerializedName("...")`
+            if lang in ("rust", "csharp", "java"):
+                m_attr = re.search(
+                    r'(?:serde\s*\([^)]*rename\s*=\s*|JsonPropertyName\s*\(\s*|JsonProperty\s*\(\s*|SerializedName\s*\(\s*)["\']([a-zA-Z0-9_.-]+)["\']',
+                    stripped,
+                )
+                if m_attr:
+                    pending_serde_key = m_attr.group(1)
+                elif pending_serde_key:
+                    m_f = (
+                        re.match(r"^(?:pub(?:\([^)]*\))?\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*([^,=;]+)", stripped)
+                        if lang == "rust"
+                        else re.match(r"^(?:public|private|protected|internal|readonly|final|\s)+[A-Za-z0-9_<>,.?\[\]]+\s+([A-Za-z_][A-Za-z0-9_]*)\b", stripped)
+                    )
+                    if m_f:
+                        register_serialized_field(m_f.group(1), stripped.rstrip(",;{").strip(), pending_serde_key, idx)
+                        pending_serde_key = None
+                    elif stripped.startswith(("}", "fn ", "pub fn ")):
+                        pending_serde_key = None
+
+            # A3) Python Pydantic `Field(..., alias="...")`
+            if lang == "python" and "alias=" in stripped:
+                m_py_f = re.match(r"^([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*[^=]+=\s*Field\([^)]*alias\s*=\s*['\"]([a-zA-Z0-9_.-]+)['\"]", stripped)
+                if m_py_f:
+                    register_serialized_field(m_py_f.group(1), stripped, m_py_f.group(2), idx)
+
+            # B) Top-level / Const-block Constant & Opcode definitions across all 7 languages
+            if idx not in func_body_lines:
+                m_const = (
+                    re.match(
+                        r"^(?:pub(?:\([^)]*\))?\s+|export\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|final\s+|readonly\s+|const\s+|var\s+|(?:byte|uint8|uint16|uint32|int|u8|u16|u32)\s+)+([A-Z][A-Za-z0-9_]{1,})\s*(?::[^=]+|\s+[a-z0-9_]+)?=\s*(.+)$",
+                        stripped,
+                    )
+                    or re.match(r"^([A-Z][A-Za-z0-9_]{2,})\s*(?::[^=]+|\s+[a-z0-9_]+)?=\s*(.+)$", stripped)
+                )
+                if m_const:
+                    cname = m_const.group(1)
+                    rhs_raw = m_const.group(2).strip()
+                    if not is_ignored_const(cname) and not rhs_raw.startswith(("func(", "function(", "async ")):
+                        c_node_id = f"{rel_path}::{cname}"
+                        c_doc = extract_comment_for_line(idx)
+                        sig_clean = re.sub(r"\s*(?://|#).*$", "", stripped).rstrip(";").strip()[:140]
+                        if c_node_id not in existing_node_ids:
+                            existing_node_ids.add(c_node_id)
+                            result.nodes.append(
+                                GraphNode(
+                                    id=c_node_id,
+                                    name=cname,
+                                    qualified_name=cname,
+                                    kind="constant",
+                                    file_path=rel_path,
+                                    start_line=idx,
+                                    end_line=idx,
+                                    signature=sig_clean,
+                                    language=lang,
+                                    doc_comment=c_doc,
+                                )
+                            )
+                        file_constants[cname] = c_node_id
+
+                        # Check if constant defines a hex opcode (e.g. `0xCC`, `0xCC_u8;`, `byte(0xCC)`, `0xCC as const`)
+                        rhs_no_comment = re.sub(r"(?://|#).*$", "", rhs_raw).rstrip(";,").strip()
+                        m_hex = re.match(
+                            r"^(?:(?:byte|uint8|uint16|uint32|int|u8|u16|u32)\s*\(\s*)?0[xX]([0-9a-fA-F]{1,8})(?:_[a-zA-Z0-9]+)?\b",
+                            rhs_no_comment,
+                        )
+                        if m_hex:
+                            hex_val = int(m_hex.group(1), 16)
+                            hex_norm = f"0x{hex_val:02X}" if hex_val <= 0xFF else f"0x{hex_val:04X}"
+                            cid = self._ensure_contract_node(
+                                "opcode",
+                                hex_norm,
+                                rel_path,
+                                idx,
+                                result,
+                                doc=f"{cname} = {hex_norm} ({rel_path}:{idx})",
+                            )
+                            result.edges.append(
+                                GraphEdge(
+                                    source_id=c_node_id,
+                                    target_name=hex_norm,
+                                    target_id=cid,
+                                    edge_type="shares_contract",
+                                    file_path=rel_path,
+                                    line=idx,
+                                    confidence="exact",
+                                )
+                            )
+                            result.edges.append(
+                                GraphEdge(
+                                    source_id=cid,
+                                    target_name=cname,
+                                    target_id=c_node_id,
+                                    edge_type="shares_contract",
+                                    file_path=rel_path,
+                                    line=idx,
+                                    confidence="exact",
+                                )
+                            )
+
+        # 3. Scan function/method bodies (and module lines) for:
+        #    - Opcode / Constant references (`OpSGMOnline`, `S_GM_ONLINE`, `KOAP`)
+        #    - Struct field accesses (`.MaxCharsPerIP`)
+        #    - Config / schema string keys (`'multi_guard.max_chars_per_ip'`)
+        #    - Cross-language REST / HTTP API route strings (`'/api/v1/login'`)
+        NON_CONFIG_EXTS = {
+            "gd", "tscn", "tres", "godot", "go", "py", "js", "ts", "tsx", "jsx",
+            "rs", "cs", "java", "json", "png", "jpg", "webp", "svg", "ogg", "wav",
+            "mp3", "ttf", "otf", "shader", "gdshader", "html", "css", "sql", "md", "txt", "exe", "sh",
+        }
+        for idx, raw_line in enumerate(lines, start=1):
+            stripped = raw_line.strip()
+            if not stripped or stripped.startswith(("#", "//", "/*", "*")):
+                continue
+            scope_id = line_to_scope.get(idx, file_node_id)
+            code_part = re.sub(r"(?://|#).*$", "", stripped)
+
+            # 3A. References to constants/opcodes inside functions (filtering out built-in constants per language)
+            if idx in func_body_lines:
+                for tok in re.findall(r"\b(?:Op[A-Z][A-Za-z0-9_]+|[CS]_[A-Z][A-Z0-9_]{2,}|[A-Z][A-Z0-9_]{2,})\b", code_part):
+                    if is_ignored_const(tok):
+                        continue
+                    if tok in file_constants or tok.startswith(("Op", "C_", "S_")):
+                        result.edges.append(
+                            GraphEdge(
+                                source_id=scope_id,
+                                target_name=tok,
+                                receiver="",
+                                target_id=file_constants.get(tok),
+                                edge_type="calls",
+                                file_path=rel_path,
+                                line=idx,
+                                confidence="exact" if tok in file_constants else "scoped",
+                            )
+                        )
+
+            # 3B. Go struct field references (`.MaxCharsPerIP`)
+            if lang == "go" and idx in func_body_lines and "." in code_part:
+                for f_tok in re.findall(r"\.([A-Z][A-Za-z0-9_]{2,})\b", code_part):
+                    # Avoid recording method calls `.Foo(` or stdlib package calls (`strings.TrimSpace`)
+                    if f".{f_tok}(" in code_part:
+                        continue
+                    if f_tok in go_field_to_json:
+                        j_key = go_field_to_json[f_tok]
+                        cid = self._ensure_contract_node("config", j_key, rel_path, idx, result)
+                        result.edges.append(
+                            GraphEdge(
+                                source_id=scope_id,
+                                target_name=j_key,
+                                target_id=cid,
+                                edge_type="shares_contract",
+                                file_path=rel_path,
+                                line=idx,
+                                confidence="exact",
+                            )
+                        )
+                    else:
+                        result.edges.append(
+                            GraphEdge(
+                                source_id=scope_id,
+                                target_name=f_tok,
+                                receiver="struct_field",
+                                edge_type="calls",
+                                file_path=rel_path,
+                                line=idx,
+                            )
+                        )
+
+            # 3C. Dotted config / schema keys in string literals (e.g. `'multi_guard.max_chars_per_ip'`)
+            for m_str in re.finditer(r'["\']([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]+)+)["\']', code_part):
+                full_key = m_str.group(1)
+                parts = full_key.split(".")
+                leaf = parts[-1]
+                if leaf in NON_CONFIG_EXTS:
+                    continue
+                if any(e.edge_type == "uses_i18n" and e.line == idx and e.target_name == full_key for e in result.edges):
+                    continue
+                if "_" in full_key:
+                    cid = self._ensure_contract_node("config", leaf, rel_path, idx, result, doc=f"schema key '{full_key}'")
+                    result.edges.append(
+                        GraphEdge(
+                            source_id=scope_id,
+                            target_name=leaf,
+                            receiver=full_key,
+                            target_id=cid,
+                            edge_type="shares_contract",
+                            file_path=rel_path,
+                            line=idx,
+                            confidence="exact",
+                        )
+                    )
+                    result.edges.append(
+                        GraphEdge(
+                            source_id=cid,
+                            target_name=scope_id.split("::")[-1],
+                            receiver=full_key,
+                            target_id=scope_id,
+                            edge_type="shares_contract",
+                            file_path=rel_path,
+                            line=idx,
+                            confidence="exact",
+                        )
+                    )
+
+            # 3D. Cross-Language HTTP / REST API Route Contracts (`"/api/v1/..."`)
+            for m_api in re.finditer(r'["\'`](/api/[A-Za-z0-9_./:{}-]+)["\'`]', code_part):
+                raw_route = m_api.group(1).rstrip("/")
+                norm_route = re.sub(r"(?::[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})", "{param}", raw_route)
+                target_scope = scope_id
+                # If this is a route decorator above a function (`@app.get("/api/...")`, `[HttpGet("/api/...")]`, `@GetMapping("/api/...")`), bind to the function below it
+                if target_scope == file_node_id:
+                    for look_ln in range(idx + 1, min(len(lines) + 1, idx + 5)):
+                        if look_ln in line_to_scope:
+                            target_scope = line_to_scope[look_ln]
+                            break
+                cid = self._ensure_contract_node("api", norm_route, rel_path, idx, result, doc=f"API endpoint {norm_route}")
+                result.edges.append(
+                    GraphEdge(
+                        source_id=target_scope,
+                        target_name=norm_route,
+                        receiver=raw_route,
+                        target_id=cid,
+                        edge_type="shares_contract",
+                        file_path=rel_path,
+                        line=idx,
+                        confidence="exact",
+                    )
+                )
+                result.edges.append(
+                    GraphEdge(
+                        source_id=cid,
+                        target_name=target_scope.split("::")[-1],
+                        receiver=raw_route,
+                        target_id=target_scope,
+                        edge_type="shares_contract",
+                        file_path=rel_path,
+                        line=idx,
+                        confidence="exact",
+                    )
+                )
+
+    # -------------------------------------------------------------------------
+    # JSON & PO Data / Seed / Map / Locale File Parsers
+    # -------------------------------------------------------------------------
+
+    def _parse_json_file(
+        self,
+        source_text: str,
+        rel_path: str,
+        file_node_id: str,
+        result: ParseResult,
+    ) -> None:
+        try:
+            data = json.loads(source_text)
+        except Exception:
+            return
+
+        lines = source_text.splitlines()
+        rel_lower = rel_path.lower()
+        is_locale = any(tok in rel_lower for tok in ("locale", "locales", "i18n", "translation", "lang/"))
+
+        def find_line_of(needle: str, start_from: int = 1) -> int:
+            q = f'"{needle}"'
+            for i in range(max(1, start_from), len(lines) + 1):
+                if q in lines[i - 1]:
+                    return i
+            for i in range(1, len(lines) + 1):
+                if needle in lines[i - 1]:
+                    return i
+            return 1
+
+        if is_locale and isinstance(data, dict):
+            # Flatten nested locale dictionaries (`{"n": {"x": "msg"}}` -> `"n.x": "msg"`)
+            def walk_locale(obj: dict[str, Any], prefix: str = "", last_ln: int = 1) -> None:
+                for k, v in obj.items():
+                    full_k = f"{prefix}.{k}" if prefix else str(k)
+                    ln = find_line_of(str(k), last_ln)
+                    if isinstance(v, dict):
+                        walk_locale(v, full_k, ln)
+                    elif isinstance(v, str):
+                        ph_cnt = self._count_format_placeholders(v)
+                        i18n_id = f"i18n::{full_k}"
+                        val_preview = v[:90] + ("..." if len(v) > 90 else "")
+                        result.nodes.append(
+                            GraphNode(
+                                id=f"{rel_path}::{full_k}",
+                                name=full_k,
+                                qualified_name=f"i18n::{full_k}",
+                                kind="i18n",
+                                file_path=rel_path,
+                                start_line=ln,
+                                end_line=ln,
+                                signature=f'{full_k} = "{val_preview}"',
+                                language="json",
+                                doc_comment=f"{full_k}: {v}"[:300],
+                            )
+                        )
+                        if not any(n.id == i18n_id for n in result.nodes):
+                            result.nodes.append(
+                                GraphNode(
+                                    id=i18n_id,
+                                    name=full_k,
+                                    qualified_name=f"i18n::{full_k}",
+                                    kind="i18n",
+                                    file_path=rel_path,
+                                    start_line=ln,
+                                    end_line=ln,
+                                    signature=f'{full_k} = "{val_preview}"',
+                                    language="i18n",
+                                    doc_comment=f"{full_k}: {v}"[:300],
+                                )
+                            )
+                        result.edges.append(
+                            GraphEdge(
+                                source_id=file_node_id,
+                                target_name=full_k,
+                                receiver=f"placeholders:{ph_cnt}",
+                                target_id=i18n_id,
+                                edge_type="defines_i18n",
+                                file_path=rel_path,
+                                line=ln,
+                                confidence="exact",
+                            )
+                        )
+
+            walk_locale(data)
+            return
+
+        # Data / Seed / Map / Config JSON indexing
+        stem = Path(rel_path).stem
+
+        def index_record_object(obj: dict[str, Any], path_prefix: str, approx_ln: int) -> None:
+            # Determine primary label for this JSON object
+            label = (
+                obj.get("name")
+                or obj.get("title")
+                or obj.get("key")
+                or obj.get("code")
+                or obj.get("map_name")
+                or obj.get("zone_name")
+                or obj.get("id")
+            )
+            flat_pairs: list[str] = []
+            for k, v in obj.items():
+                if isinstance(v, (str, int, float, bool)):
+                    flat_pairs.append(f"{k}={v}")
+                    # If key looks like a snake_case config setting, link to `contract::config::<k>`
+                    if isinstance(k, str) and "_" in k and k.islower() and k not in ("map_id", "zone_id", "item_id", "npc_id", "created_at", "updated_at"):
+                        kl = find_line_of(k, approx_ln)
+                        full_cfg_path = f"{path_prefix}.{k}" if path_prefix else k
+                        cid = self._ensure_contract_node("config", k, rel_path, kl, result, doc=f"{rel_path}: {full_cfg_path}={v}")
+                        rec_node_id = f"{rel_path}::{full_cfg_path}"
+                        result.nodes.append(
+                            GraphNode(
+                                id=rec_node_id,
+                                name=k,
+                                qualified_name=f"{stem}.{full_cfg_path}",
+                                kind="data",
+                                file_path=rel_path,
+                                start_line=kl,
+                                end_line=kl,
+                                signature=f'"{k}": {json.dumps(v)}',
+                                language="json",
+                                doc_comment=f"{full_cfg_path}: {k}={v}",
+                            )
+                        )
+                        result.edges.append(
+                            GraphEdge(
+                                source_id=rec_node_id,
+                                target_name=k,
+                                receiver=full_cfg_path,
+                                target_id=cid,
+                                edge_type="shares_contract",
+                                file_path=rel_path,
+                                line=kl,
+                                confidence="exact",
+                            )
+                        )
+                        result.edges.append(
+                            GraphEdge(
+                                source_id=cid,
+                                target_name=f"{stem}.{full_cfg_path}",
+                                receiver=full_cfg_path,
+                                target_id=rec_node_id,
+                                edge_type="shares_contract",
+                                file_path=rel_path,
+                                line=kl,
+                                confidence="exact",
+                            )
+                        )
+                elif isinstance(v, dict):
+                    sub_ln = find_line_of(str(k), approx_ln)
+                    index_record_object(v, f"{path_prefix}.{k}" if path_prefix else str(k), sub_ln)
+                elif isinstance(v, list):
+                    sub_ln = find_line_of(str(k), approx_ln)
+                    for idx_item, item in enumerate(v[:200]):
+                        if isinstance(item, dict):
+                            index_record_object(item, f"{path_prefix}.{k}[{idx_item}]" if path_prefix else f"{k}[{idx_item}]", sub_ln)
+
+            if label is not None:
+                label_str = str(label)
+                ln = find_line_of(label_str, approx_ln)
+                summary = ", ".join(flat_pairs[:12])
+                node_id = f"{rel_path}::{path_prefix or label_str}"
+                if not any(n.id == node_id for n in result.nodes):
+                    result.nodes.append(
+                        GraphNode(
+                            id=node_id,
+                            name=label_str,
+                            qualified_name=f"{stem}::{label_str}",
+                            kind="data",
+                            file_path=rel_path,
+                            start_line=ln,
+                            end_line=ln,
+                            signature=f"{stem} entry '{label_str}' ({summary[:100]})",
+                            language="json",
+                            doc_comment=f"{rel_path} {path_prefix}: {summary}"[:300],
+                        )
+                    )
+
+        if isinstance(data, dict):
+            index_record_object(data, "", 1)
+        elif isinstance(data, list):
+            for idx_item, item in enumerate(data[:300]):
+                if isinstance(item, dict):
+                    index_record_object(item, f"[{idx_item}]", 1)
+
+    def _parse_po_file(
+        self,
+        source_text: str,
+        rel_path: str,
+        file_node_id: str,
+        result: ParseResult,
+    ) -> None:
+        lines = source_text.splitlines()
+        curr_msgid: str | None = None
+        curr_ln = 1
+        for idx, raw in enumerate(lines, start=1):
+            s = raw.strip()
+            if s.startswith("msgid "):
+                curr_msgid = self._clean_string_literal(s[len("msgid ") :])
+                curr_ln = idx
+            elif s.startswith("msgstr ") and curr_msgid:
+                msgstr = self._clean_string_literal(s[len("msgstr ") :])
+                ph_cnt = self._count_format_placeholders(msgstr or curr_msgid)
+                i18n_id = f"i18n::{curr_msgid}"
+                preview = (msgstr or curr_msgid)[:80]
+                result.nodes.append(
+                    GraphNode(
+                        id=f"{rel_path}::{curr_msgid}",
+                        name=curr_msgid,
+                        qualified_name=f"i18n::{curr_msgid}",
+                        kind="i18n",
+                        file_path=rel_path,
+                        start_line=curr_ln,
+                        end_line=idx,
+                        signature=f'msgid "{curr_msgid}" -> "{preview}"',
+                        language="po",
+                        doc_comment=f"{curr_msgid}: {msgstr}",
+                    )
+                )
+                if not any(n.id == i18n_id for n in result.nodes):
+                    result.nodes.append(
+                        GraphNode(
+                            id=i18n_id,
+                            name=curr_msgid,
+                            qualified_name=f"i18n::{curr_msgid}",
+                            kind="i18n",
+                            file_path=rel_path,
+                            start_line=curr_ln,
+                            end_line=idx,
+                            signature=f'msgid "{curr_msgid}" -> "{preview}"',
+                            language="i18n",
+                            doc_comment=f"{curr_msgid}: {msgstr}",
+                        )
+                    )
+                result.edges.append(
+                    GraphEdge(
+                        source_id=file_node_id,
+                        target_name=curr_msgid,
+                        receiver=f"placeholders:{ph_cnt}",
+                        target_id=i18n_id,
+                        edge_type="defines_i18n",
+                        file_path=rel_path,
+                        line=curr_ln,
+                        confidence="exact",
+                    )
+                )
+                curr_msgid = None

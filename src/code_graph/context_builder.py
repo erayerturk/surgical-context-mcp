@@ -10,6 +10,7 @@ from typing import Any
 from .db import CodeGraphDB
 from .indexer import _is_default_ignored_dir, _ScopedIgnoreMatcher
 from .models import GraphNode
+from .parser import EXTENSION_TO_LANGUAGE, LANGUAGE_FAMILY
 
 TEXT_SCAN_EXTENSIONS: frozenset[str] = frozenset({
     ".gd", ".tscn", ".tres", ".godot",
@@ -21,6 +22,89 @@ TEXT_SCAN_EXTENSIONS: frozenset[str] = frozenset({
 
 SMALL_EDIT_FILE_LINES = 300
 SHORT_CALLEE_MAX_LINES = 25
+
+# Language-specific engine / framework / runtime lifecycle & virtual methods
+# When AST upstream is empty for these methods, text-match noise is suppressed and lifecycle info is shown.
+LANGUAGE_LIFECYCLE_METHODS: dict[str, frozenset[str]] = {
+    "gdscript": frozenset({
+        "_ready", "_enter_tree", "_exit_tree", "_process", "_physics_process",
+        "_input", "_shortcut_input", "_unhandled_input", "_unhandled_key_input",
+        "_draw", "_gui_input", "_notification", "_init", "_to_string",
+        "_get_configuration_warnings", "_make_custom_tooltip", "_get_minimum_size",
+        "_can_drop_data", "_drop_data", "_get_drag_data", "_has_point", "_clips_input",
+        "_integrate_forces", "_validate_property", "_get_property_list", "_get", "_set",
+    }),
+    "python": frozenset({
+        "__init__", "__new__", "__del__", "__repr__", "__str__", "__bytes__", "__format__",
+        "__lt__", "__le__", "__eq__", "__ne__", "__gt__", "__ge__", "__hash__", "__bool__",
+        "__getattr__", "__getattribute__", "__setattr__", "__delattr__", "__dir__",
+        "__get__", "__set__", "__delete__", "__set_name__", "__len__", "__getitem__",
+        "__setitem__", "__delitem__", "__iter__", "__next__", "__reversed__", "__contains__",
+        "__call__", "__enter__", "__exit__", "__aenter__", "__aexit__", "__await__",
+        "__aiter__", "__anext__", "__post_init__", "model_post_init",
+        "setUp", "tearDown", "setUpClass", "tearDownClass", "setup_method", "teardown_method",
+        "pytest_configure", "pytest_collection_modifyitems",
+    }),
+    "go": frozenset({
+        "init", "main", "ServeHTTP", "Error", "String", "MarshalJSON", "UnmarshalJSON",
+        "MarshalText", "UnmarshalText", "MarshalBinary", "UnmarshalBinary", "Scan", "Value",
+        "TestMain",
+    }),
+    "javascript": frozenset({
+        "constructor", "render", "componentDidMount", "componentDidUpdate", "componentWillUnmount",
+        "shouldComponentUpdate", "getDerivedStateFromProps", "getSnapshotBeforeUpdate", "componentDidCatch",
+        "connectedCallback", "disconnectedCallback", "attributeChangedCallback", "adoptedCallback",
+        "ngOnInit", "ngOnDestroy", "ngOnChanges", "ngAfterViewInit", "mounted", "unmounted",
+        "beforeMount", "beforeUnmount", "created", "getServerSideProps", "getStaticProps",
+        "getStaticPaths", "generateMetadata", "generateStaticParams", "middleware",
+        "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "toJSON", "valueOf", "toString",
+    }),
+    "rust": frozenset({
+        "main", "new", "default", "drop", "fmt", "from", "try_from", "into",
+        "deref", "deref_mut", "index", "index_mut", "poll", "clone",
+    }),
+    "csharp": frozenset({
+        "Main", "Awake", "Start", "OnEnable", "OnDisable", "OnDestroy",
+        "Update", "FixedUpdate", "LateUpdate", "OnGUI", "OnValidate", "Reset",
+        "OnApplicationQuit", "OnApplicationPause", "OnApplicationFocus",
+        "OnBecameVisible", "OnBecameInvisible", "OnPreRender", "OnPostRender", "OnRenderObject",
+        "OnDrawGizmos", "OnDrawGizmosSelected",
+        "OnTriggerEnter", "OnTriggerExit", "OnTriggerStay",
+        "OnCollisionEnter", "OnCollisionExit", "OnCollisionStay",
+        "OnTriggerEnter2D", "OnTriggerExit2D", "OnTriggerStay2D",
+        "OnCollisionEnter2D", "OnCollisionExit2D", "OnCollisionStay2D",
+        "OnAnimatorIK", "OnAnimatorMove", "OnMouseDown", "OnMouseUp", "OnMouseEnter", "OnMouseExit",
+        "Dispose", "DisposeAsync", "ToString", "Equals", "GetHashCode",
+        "_Ready", "_Process", "_PhysicsProcess", "_Input", "_UnhandledInput", "_EnterTree", "_ExitTree", "_Draw",
+    }),
+    "java": frozenset({
+        "main", "toString", "equals", "hashCode", "compareTo", "clone", "finalize",
+        "run", "call", "close", "onCreate", "onStart", "onResume", "onPause", "onStop",
+        "onDestroy", "onBind", "afterPropertiesSet", "destroy", "setUp", "tearDown",
+    }),
+}
+LANGUAGE_LIFECYCLE_METHODS["typescript"] = LANGUAGE_LIFECYCLE_METHODS["javascript"]
+LANGUAGE_LIFECYCLE_METHODS["tsx"] = LANGUAGE_LIFECYCLE_METHODS["javascript"]
+
+# Union for backwards-compatibility / fallback when target_nodes is empty
+ENGINE_LIFECYCLE_METHODS: frozenset[str] = frozenset().union(*LANGUAGE_LIFECYCLE_METHODS.values())
+
+
+def is_language_lifecycle_method(short_name: str, target_nodes: list[GraphNode]) -> bool:
+    """Return True if `short_name` is a runtime/engine/framework lifecycle callback for its language."""
+    if not short_name:
+        return False
+    if not target_nodes:
+        return short_name in ENGINE_LIFECYCLE_METHODS
+    for n in target_nodes:
+        lang = n.language
+        if short_name in LANGUAGE_LIFECYCLE_METHODS.get(lang, ()):
+            return True
+        if lang == "python" and short_name.startswith("__") and short_name.endswith("__") and len(short_name) >= 5:
+            return True
+        if lang == "go" and n.file_path.endswith("_test.go") and short_name.startswith(("Test", "Benchmark", "Fuzz", "Example")):
+            return True
+    return False
 
 
 def _read_file_lines(full_path: Path) -> list[str]:
@@ -296,14 +380,23 @@ def scan_coverage_warnings(
       - General textual occurrences when upstream is empty
     """
     short_name = symbol.split("::")[-1].split(".")[-1].strip()
+    is_lifecycle = is_language_lifecycle_method(short_name, target_nodes)
     if not short_name or len(short_name) < 2:
         return {
+            "is_engine_lifecycle": is_lifecycle,
             "dynamic_string_refs": [],
             "scene_and_resource_refs": [],
             "protocol_json_refs": [],
             "other_text_matches": [],
             "total_text_matches": 0,
         }
+
+    # Determine target language families so we NEVER scan unrelated code or scene formats
+    target_families: set[str] = {
+        LANGUAGE_FAMILY.get(n.language, n.language)
+        for n in target_nodes
+        if n.language and n.kind not in ("event", "contract", "i18n", "data")
+    }
 
     # Exclude definition lines themselves
     def_Ranges: list[tuple[str, int, int]] = [
@@ -325,11 +418,12 @@ def scan_coverage_warnings(
     escaped = re.escape(short_name)
     # Word-boundary regex for the symbol name
     word_re = re.compile(rf"(?<![A-Za-z0-9_]){escaped}(?![A-Za-z0-9_])")
-    # Dynamic string call pattern across Godot, Python, JS/TS, Go, Rust, C#/Unity, Java
+    # Language-aware dynamic string call pattern across Godot, Python, JS/TS, Go, Rust, C#/Unity, Java
     dyn_str_re = re.compile(
         rf'(?:call|call_deferred|callv|has_method|connect|disconnect|is_connected|Callable|rpc|rpc_id|emit_signal|get_node|get_node_or_null'
-        rf'|getattr|hasattr|setattr|SendMessage|BroadcastMessage|Invoke|InvokeRepeating|getMethod|getDeclaredMethod|addEventListener| on)\s*\([^)]*["\'](?:[^"\']*\/)?{escaped}["\']'
-        rf'|["\']{escaped}["\']'
+        rf'|getattr|hasattr|setattr|methodcaller|SendMessage|SendMessageUpwards|BroadcastMessage|Invoke|InvokeRepeating|StartCoroutine|StopCoroutine|GetMethod'
+        rf'|getMethod|getDeclaredMethod|getField|getDeclaredField|MethodByName|FieldByName|addEventListener|\bon)\s*\([^)]*["\'](?:[^"\']*\/)?{escaped}["\']'
+        rf'|\[\s*["\']{escaped}["\']\s*\]\s*\('
     )
 
     ignore_matcher = _ScopedIgnoreMatcher(project_root)
@@ -362,6 +456,20 @@ def scan_coverage_warnings(
             ext = Path(fname).suffix.lower()
             if ext not in TEXT_SCAN_EXTENSIONS and fname != "project.godot":
                 continue
+
+            # Filter file extension by target language family to avoid cross-language noise
+            if target_families:
+                if ext in (".tscn", ".tres", ".godot") or fname == "project.godot":
+                    if not target_families.intersection({"godot", "dotnet"}):
+                        continue
+                elif ext in (".html", ".vue", ".svelte"):
+                    if not target_families.intersection({"js", "python"}):
+                        continue
+                elif ext in EXTENSION_TO_LANGUAGE and ext not in (".json", ".po"):
+                    file_lang = EXTENSION_TO_LANGUAGE[ext]
+                    file_fam = LANGUAGE_FAMILY.get(file_lang, file_lang)
+                    if file_fam not in target_families:
+                        continue
 
             rel_path = f"{rel_dir}/{fname}" if rel_dir else fname
             if ignore_matcher.is_ignored(rel_path, is_dir=False):
@@ -404,15 +512,16 @@ def scan_coverage_warnings(
                     if not snippet.startswith(("#", "//")) and len(dynamic_string_refs) < max_matches:
                         dynamic_string_refs.append(item)
                 elif site_key not in known_call_sites and not snippet.startswith(("#", "//")):
-                    if len(other_text_matches) < max_matches:
+                    if not is_lifecycle and len(other_text_matches) < max_matches:
                         other_text_matches.append(item)
 
     return {
+        "is_engine_lifecycle": is_lifecycle,
         "dynamic_string_refs": dynamic_string_refs,
         "scene_and_resource_refs": scene_and_resource_refs,
         "protocol_json_refs": protocol_json_refs,
         "other_text_matches": other_text_matches,
-        "total_text_matches": total_text_matches,
+        "total_text_matches": 0 if is_lifecycle else total_text_matches,
     }
 
 
@@ -427,8 +536,13 @@ def format_coverage_warnings_section(
     proto = coverage.get("protocol_json_refs", [])
     other = coverage.get("other_text_matches", [])
     total_txt = int(coverage.get("total_text_matches", 0))
+    is_lifecycle = bool(coverage.get("is_engine_lifecycle"))
 
-    if upstream_empty:
+    if is_lifecycle:
+        lines.append(
+            "- **Engine Lifecycle Callback:** Invoked automatically by the engine runtime (unrelated textual occurrences suppressed)."
+        )
+    elif upstream_empty:
         lines.append(
             f"- **Upstream Note:** Grafta çağıran bulunamadı; metin taramasında **{total_txt}** eşleşme bulundu."
         )
@@ -624,6 +738,7 @@ def build_edit_context(
 
     # Uncertain (name_only) summary (max 5)
     uncertain_list = impact.get("uncertain_name_only", [])[:5]
+    contracts_list = impact.get("cross_language_contracts", [])
 
     return {
         "symbol": symbol,
@@ -643,6 +758,7 @@ def build_edit_context(
         "external_callees": external_callees,
         "caller_windows": caller_windows,
         "other_signatures": other_signatures,
+        "cross_language_contracts": contracts_list,
         "uncertain_name_only": uncertain_list,
         "coverage": coverage,
         "upstream_empty": len(caller_windows) == 0,
@@ -1014,6 +1130,8 @@ def format_rename_or_delete_markdown(data: dict[str, Any]) -> str:
             lines.append(f"- `{c['location']}` [{c['confidence']}] — `{c['snippet']}`")
         if len(calls) > 25:
             lines.append(f"- *(+{len(calls) - 25} more call sites)*")
+    elif data.get("coverage", {}).get("is_engine_lifecycle"):
+        lines.append("- Engine lifecycle callback (invoked automatically by engine runtime).")
     else:
         total_txt = data.get("coverage", {}).get("total_text_matches", 0)
         lines.append(f"- Grafta çağıran bulunamadı; metin taramasında **{total_txt}** eşleşme bulundu.")

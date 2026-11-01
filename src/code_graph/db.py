@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import time
 from collections import Counter, deque
@@ -69,7 +70,8 @@ class CodeGraphDB:
                     start_line INTEGER NOT NULL,
                     end_line INTEGER NOT NULL,
                     signature TEXT NOT NULL,
-                    language TEXT NOT NULL
+                    language TEXT NOT NULL,
+                    doc_comment TEXT NOT NULL DEFAULT ''
                 );
 
                 CREATE TABLE IF NOT EXISTS edges (
@@ -83,12 +85,27 @@ class CodeGraphDB:
                     file_path TEXT NOT NULL,
                     line INTEGER NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS usage_telemetry (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp REAL NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    returned_tokens INTEGER NOT NULL,
+                    raw_files_tokens INTEGER NOT NULL,
+                    saved_tokens INTEGER NOT NULL,
+                    files_touched INTEGER NOT NULL
+                );
                 """
             )
             # Migrate existing tables if older schema lacks new columns
             f_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(files)").fetchall()}
             if "mtime" not in f_cols:
                 self.conn.execute("ALTER TABLE files ADD COLUMN mtime REAL NOT NULL DEFAULT 0;")
+
+            n_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(nodes)").fetchall()}
+            if "doc_comment" not in n_cols:
+                self.conn.execute("ALTER TABLE nodes ADD COLUMN doc_comment TEXT NOT NULL DEFAULT '';")
 
             e_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(edges)").fetchall()}
             if "receiver" not in e_cols:
@@ -149,7 +166,10 @@ class CodeGraphDB:
             for i in range(0, len(file_paths), 500):
                 chunk = [(fp,) for fp in file_paths[i : i + 500]]
                 self.conn.executemany("DELETE FROM files WHERE file_path = ?", chunk)
-                self.conn.executemany("DELETE FROM nodes WHERE file_path = ? AND kind != 'event'", chunk)
+                self.conn.executemany(
+                    "DELETE FROM nodes WHERE file_path = ? AND kind NOT IN ('event', 'contract') AND id NOT LIKE 'i18n::%'",
+                    chunk,
+                )
                 self.conn.executemany("DELETE FROM edges WHERE file_path = ?", chunk)
 
         if len(file_paths) >= vacuum_threshold:
@@ -171,7 +191,7 @@ class CodeGraphDB:
         with self.conn:
             for res in results:
                 self.conn.execute(
-                    "DELETE FROM nodes WHERE file_path = ? AND kind != 'event'",
+                    "DELETE FROM nodes WHERE file_path = ? AND kind NOT IN ('event', 'contract') AND id NOT LIKE 'i18n::%'",
                     (res.file_path,),
                 )
                 self.conn.execute(
@@ -188,8 +208,8 @@ class CodeGraphDB:
                 self.conn.executemany(
                     """
                     INSERT OR REPLACE INTO nodes
-                    (id, name, qualified_name, kind, file_path, start_line, end_line, signature, language)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, name, qualified_name, kind, file_path, start_line, end_line, signature, language, doc_comment)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -202,6 +222,7 @@ class CodeGraphDB:
                             n.end_line,
                             n.signature,
                             n.language,
+                            n.doc_comment or "",
                         )
                         for n in res.nodes
                     ],
@@ -538,20 +559,20 @@ class CodeGraphDB:
                     call_updates.append((matched_node["id"] if matched_node else None, confidence, e["id"]))
                     continue
 
-                # B) Local / self / super / unqualified call (`recv in ("", "self", "this", "super")`)
-                if recv in ("", "self", "this", "super"):
+                # B) Local / self / super / unqualified call (`recv in ("", "self", "this", "super", "struct_field")`)
+                if recv in ("", "self", "this", "super", "struct_field"):
                     # B1. Same file (`exact`)
                     if recv != "super":
                         same_file_cands = [
                             c for c in by_file_and_name.get((efile, tname), [])
-                            if c["kind"] in ("method", "function", "class") and c["id"] != src_id
+                            if c["kind"] in ("method", "function", "class", "constant", "field") and c["id"] != src_id
                         ]
                         if same_file_cands:
                             matched_node = same_file_cands[0]
                             confidence = "exact"
 
                     # B2. Inheritance (`extends` / `super`) chain (`scoped` or `exact` for super)
-                    if matched_node is None:
+                    if matched_node is None and recv != "struct_field":
                         inh_match = find_in_inheritance(efile, tname)
                         if inh_match:
                             matched_node = inh_match
@@ -562,29 +583,29 @@ class CodeGraphDB:
                         for imp_fp in file_imports.get(efile, set()):
                             imp_cands = [
                                 c for c in by_file_and_name.get((imp_fp, tname), [])
-                                if c["kind"] in ("function", "method", "class")
+                                if c["kind"] in ("function", "method", "class", "constant", "field")
                             ]
                             if imp_cands:
                                 matched_node = imp_cands[0]
                                 confidence = "scoped"
                                 break
 
-                    # B4. Go same-package directory function call (`exact`)
+                    # B4. Go same-package directory function / constant / struct field (`exact`)
                     if matched_node is None and efam == "go":
                         e_dir = os.path.dirname(efile)
                         pkg_cands = [
                             c for c in by_lang_and_name.get(("go", tname), [])
-                            if os.path.dirname(c["file_path"]) == e_dir and c["kind"] in ("function", "class")
+                            if os.path.dirname(c["file_path"]) == e_dir and c["kind"] in ("function", "class", "constant", "field")
                         ]
                         if len(pkg_cands) == 1:
                             matched_node = pkg_cands[0]
                             confidence = "exact"
 
-                    # B5. Unqualified call with a single unique definition in the same language family (`scoped`)
-                    if matched_node is None and recv == "" and len(tname) >= 4:
+                    # B5. Unqualified call/constant/field with a single unique definition in the same language family (`scoped`)
+                    if matched_node is None and recv in ("", "struct_field") and len(tname) >= 3:
                         lang_cands = [
                             c for c in by_lang_and_name.get((efam, tname), [])
-                            if c["kind"] in ("function", "class") and c["id"] != src_id
+                            if c["kind"] in ("function", "class", "constant", "field") and c["id"] != src_id
                         ]
                         if len(lang_cands) == 1:
                             matched_node = lang_cands[0]
@@ -656,12 +677,13 @@ class CodeGraphDB:
                     call_updates,
                 )
 
-            # 5. Remove orphaned virtual event nodes
+            # 5. Remove orphaned virtual event / contract / i18n nodes
             self.conn.execute(
                 """
                 DELETE FROM nodes
-                WHERE kind = 'event'
+                WHERE kind IN ('event', 'contract')
                   AND id NOT IN (SELECT DISTINCT target_id FROM edges WHERE target_id IS NOT NULL)
+                  AND id NOT IN (SELECT DISTINCT source_id FROM edges WHERE source_id IS NOT NULL)
                 """
             )
             self.set_meta("last_indexed_at", time.time())
@@ -674,11 +696,12 @@ class CodeGraphDB:
         return f_cnt, n_cnt, e_cnt
 
     # -------------------------------------------------------------------------
-    # Symbol Lookup & Disambiguation (`file::symbol`, `Class.method`, `Autoload.method`)
+    # Symbol Lookup & Disambiguation (`file::symbol`, `Class.method`, `Autoload.method`, Contracts)
     # -------------------------------------------------------------------------
 
     @staticmethod
     def _row_to_node(row: sqlite3.Row) -> GraphNode:
+        keys = row.keys()
         return GraphNode(
             id=row["id"],
             name=row["name"],
@@ -689,6 +712,7 @@ class CodeGraphDB:
             end_line=row["end_line"],
             signature=row["signature"],
             language=row["language"],
+            doc_comment=row["doc_comment"] if "doc_comment" in keys else "",
         )
 
     def find_symbol_nodes(self, symbol: str) -> list[GraphNode]:
@@ -698,6 +722,7 @@ class CodeGraphDB:
           - `path/to/file.gd::symbol` or `file.gd::symbol`
           - `AutoloadName.method` (resolves via `project.godot` autoloads!)
           - `ClassName.method`
+          - `0xCC` (hex opcode contract) or `multi_guard.max_chars_per_ip` (dotted config contract)
           - `symbol` or `event::SIGNAL_NAME`
         """
         q = symbol.strip()
@@ -705,7 +730,7 @@ class CodeGraphDB:
             return []
 
         # 0. Explicit `file::symbol` syntax
-        if "::" in q and not q.startswith("event::"):
+        if "::" in q and not q.startswith(("event::", "contract::", "i18n::")):
             file_part, sym_part = q.split("::", 1)
             rows = self.conn.execute(
                 """
@@ -736,20 +761,36 @@ class CodeGraphDB:
                 if rows:
                     return [self._row_to_node(r) for r in rows]
 
-        # 1. Exact match on id, qualified_name, or name
+        # 1. Exact match on id, qualified_name, name, event::q, contract::*, i18n::q
+        leaf_q = q.split(".")[-1] if "." in q and "_" in q else q
+        norm_api_q = re.sub(r"(?::[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})", "{param}", q.rstrip("/")) if q.startswith("/api/") else q
         rows = self.conn.execute(
             """
             SELECT * FROM nodes
-            WHERE (id = ? OR qualified_name = ? OR name = ? OR id = ?)
+            WHERE (
+                id = ? OR qualified_name = ? OR name = ?
+                OR id = ? OR id = ? OR id = ? OR id = ? OR id = ?
+                OR name = ?
+            )
               AND kind != 'file'
             ORDER BY CASE
                 WHEN id = ? THEN 0
                 WHEN qualified_name = ? THEN 1
                 WHEN name = ? THEN 2
-                ELSE 3
+                WHEN kind = 'contract' THEN 3
+                ELSE 4
             END
             """,
-            (q, q, q, f"event::{q}", q, q, q),
+            (
+                q, q, q,
+                f"event::{q}",
+                f"contract::config::{leaf_q}",
+                f"contract::opcode::{q.upper() if q.lower().startswith('0x') else q}",
+                f"contract::api::{norm_api_q}",
+                f"i18n::{q}",
+                leaf_q,
+                q, q, q,
+            ),
         ).fetchall()
 
         if rows:
@@ -759,42 +800,98 @@ class CodeGraphDB:
         rows = self.conn.execute(
             """
             SELECT * FROM nodes
-            WHERE (LOWER(qualified_name) = LOWER(?) OR LOWER(name) = LOWER(?))
+            WHERE (LOWER(qualified_name) = LOWER(?) OR LOWER(name) = LOWER(?) OR LOWER(name) = LOWER(?))
               AND kind != 'file'
             """,
-            (q, q),
+            (q, q, leaf_q),
         ).fetchall()
         if rows:
             return [self._row_to_node(r) for r in rows]
 
-        # 3. Substring / partial match
+        # 3. Substring / partial match (also checks `doc_comment` if no name match)
         like_q = f"%{q}%"
         rows = self.conn.execute(
             """
             SELECT * FROM nodes
-            WHERE (qualified_name LIKE ? OR name LIKE ?) AND kind != 'file'
-            ORDER BY LENGTH(name) ASC
+            WHERE (qualified_name LIKE ? OR name LIKE ? OR doc_comment LIKE ?) AND kind != 'file'
+            ORDER BY CASE WHEN name LIKE ? THEN 0 ELSE 1 END, LENGTH(name) ASC
             LIMIT 10
             """,
-            (like_q, like_q),
+            (like_q, like_q, like_q, like_q),
         ).fetchall()
         return [self._row_to_node(r) for r in rows]
 
     def search_symbols(self, query: str = "", kind: str | None = None, limit: int = 30) -> list[GraphNode]:
-        """Search symbols in the graph by name/substring and optional kind filter."""
+        """
+        Search symbols and data/i18n nodes by name, substring, OR concept/docstring/comment words.
+        For multi-word concept queries (e.g. 'attack stat'), ranks symbols matching the query words
+        across `name`, `qualified_name`, `signature`, `doc_comment`, and `file_path`.
+        """
         sql = "SELECT * FROM nodes WHERE kind != 'file'"
         params: list[Any] = []
         if kind:
             sql += " AND kind = ?"
             params.append(kind)
-        if query:
-            sql += " AND (name LIKE ? OR qualified_name LIKE ? OR file_path LIKE ?)"
-            like_q = f"%{query}%"
-            params.extend([like_q, like_q, like_q])
-        sql += " ORDER BY kind, file_path, start_line LIMIT ?"
-        params.append(limit)
-        rows = self.conn.execute(sql, params).fetchall()
-        return [self._row_to_node(r) for r in rows]
+
+        q = query.strip()
+        if not q:
+            sql += " ORDER BY kind, file_path, start_line LIMIT ?"
+            params.append(limit)
+            rows = self.conn.execute(sql, params).fetchall()
+            return [self._row_to_node(r) for r in rows]
+
+        # Direct substring match across name, qualified_name, file_path, signature, doc_comment
+        like_q = f"%{q}%"
+        direct_sql = (
+            sql
+            + " AND (name LIKE ? OR qualified_name LIKE ? OR file_path LIKE ? OR signature LIKE ? OR doc_comment LIKE ?)"
+            + " ORDER BY CASE WHEN LOWER(name) = LOWER(?) THEN 0 WHEN name LIKE ? THEN 1 WHEN doc_comment LIKE ? THEN 2 ELSE 3 END, kind, file_path, start_line LIMIT ?"
+        )
+        direct_rows = self.conn.execute(
+            direct_sql,
+            [*params, like_q, like_q, like_q, like_q, like_q, q, like_q, like_q, limit],
+        ).fetchall()
+
+        results = [self._row_to_node(r) for r in direct_rows]
+        seen_ids = {n.id for n in results}
+
+        # Multi-word concept fallback (e.g. "attack stat" -> matches KOAP with comment "attack power" in stats)
+        words = [w.lower() for w in re.findall(r"[A-Za-z0-9_]{2,}", q) if w.lower() not in ("the", "and", "for", "with")]
+        if len(words) >= 2 and len(results) < limit:
+            or_clauses = " OR ".join(
+                "(LOWER(name) LIKE ? OR LOWER(qualified_name) LIKE ? OR LOWER(signature) LIKE ? OR LOWER(doc_comment) LIKE ? OR LOWER(file_path) LIKE ?)"
+                for _ in words
+            )
+            word_params: list[Any] = []
+            for w in words:
+                lw = f"%{w}%"
+                word_params.extend([lw, lw, lw, lw, lw])
+
+            cand_rows = self.conn.execute(
+                f"{sql} AND ({or_clauses}) LIMIT 300",
+                [*params, *word_params],
+            ).fetchall()
+
+            scored_cands: list[tuple[int, int, GraphNode]] = []
+            for r in cand_rows:
+                if r["id"] in seen_ids:
+                    continue
+                node = self._row_to_node(r)
+                haystack = f"{node.name} {node.qualified_name} {node.signature} {node.doc_comment} {node.file_path}".lower()
+                matched_w = sum(1 for w in words if w in haystack)
+                # Also reward prefix/stem overlap (e.g. "stat" matching "stats" or "attack" matching "attack power")
+                exact_doc_hits = sum(2 for w in words if w in (node.doc_comment or "").lower() or w in node.name.lower())
+                if matched_w >= 1 and exact_doc_hits >= 2:
+                    scored_cands.append((matched_w, exact_doc_hits, node))
+
+            scored_cands.sort(key=lambda x: (x[0], x[1]), reverse=True)
+            for _, _, n in scored_cands:
+                if len(results) >= limit:
+                    break
+                results.append(n)
+                seen_ids.add(n.id)
+
+        return results
 
     # -------------------------------------------------------------------------
     # Impact Subgraph Query (Scoped, Confidence-Aware, Windowed, Budgeted)
@@ -1110,13 +1207,80 @@ class CodeGraphDB:
                         visited_down.add(l_node.id)
                         queue_down.append((l_node.id, curr_depth + 1))
 
+        # --- 3. CROSS-LANGUAGE CONTRACT BRIDGE (`contract::opcode::*`, `contract::config::*`) ---
+        contract_ids: set[str] = {nid for nid, n in nodes_by_id.items() if n.kind == "contract"}
+        for nid in list(nodes_by_id.keys()):
+            c_rows = self.conn.execute(
+                """
+                SELECT target_id FROM edges WHERE source_id = ? AND edge_type = 'shares_contract' AND target_id LIKE 'contract::%'
+                UNION
+                SELECT source_id FROM edges WHERE target_id = ? AND edge_type = 'shares_contract' AND source_id LIKE 'contract::%'
+                """,
+                (nid, nid),
+            ).fetchall()
+            for cr in c_rows:
+                if cr[0]:
+                    contract_ids.add(cr[0])
+
+        cross_language_contracts: list[dict[str, Any]] = []
+        seen_contract_peers: set[tuple[str, str]] = set()
+        for cid in sorted(contract_ids):
+            c_row = self.conn.execute("SELECT * FROM nodes WHERE id = ?", (cid,)).fetchone()
+            c_label = c_row["qualified_name"] if c_row else cid
+            peer_edges = self.conn.execute(
+                """
+                SELECT source_id AS peer_id, file_path, line, receiver FROM edges WHERE target_id = ? AND edge_type = 'shares_contract'
+                UNION
+                SELECT target_id AS peer_id, file_path, line, receiver FROM edges WHERE source_id = ? AND edge_type = 'shares_contract'
+                """,
+                (cid, cid),
+            ).fetchall()
+            for pe in peer_edges:
+                pid = pe["peer_id"]
+                if not pid or pid == cid or (cid, pid) in seen_contract_peers:
+                    continue
+                seen_contract_peers.add((cid, pid))
+                p_row = self.conn.execute("SELECT * FROM nodes WHERE id = ?", (pid,)).fetchone()
+                if not p_row:
+                    continue
+                p_node = self._row_to_node(p_row)
+                nodes_by_id.setdefault(p_node.id, p_node)
+                node_min_depth.setdefault(p_node.id, 1)
+                node_best_conf.setdefault(p_node.id, "exact")
+
+                # Also find direct callers/users of this contract peer (e.g. `_on_packet` using `S_GM_ONLINE`)
+                peer_callers = self.conn.execute(
+                    "SELECT source_id, file_path, line FROM edges WHERE target_id = ? AND confidence IN ('exact', 'scoped')",
+                    (p_node.id,),
+                ).fetchall()
+                caller_summaries: list[str] = []
+                for pc in peer_callers[:6]:
+                    c_src = self.conn.execute("SELECT * FROM nodes WHERE id = ?", (pc["source_id"],)).fetchone()
+                    if c_src and c_src["kind"] not in ("contract", "file"):
+                        cn = self._row_to_node(c_src)
+                        nodes_by_id.setdefault(cn.id, cn)
+                        node_min_depth.setdefault(cn.id, 1)
+                        node_best_conf.setdefault(cn.id, "exact")
+                        node_focus_lines.setdefault(cn.id, []).append(int(pc["line"]))
+                        caller_summaries.append(f"{cn.qualified_name} ({pc['file_path']}:{pc['line']})")
+
+                cross_language_contracts.append({
+                    "contract": c_label,
+                    "symbol": p_node.qualified_name,
+                    "kind": p_node.kind,
+                    "language": p_node.language,
+                    "location": f"{p_node.file_path}:{p_node.start_line}-{p_node.end_line}",
+                    "signature": p_node.signature,
+                    "callers": caller_summaries,
+                })
+
         # Sort upstream & downstream by (depth, confidence=='scoped', call_site)
         upstream_relations.sort(key=lambda r: (r["depth"], 0 if r["confidence"] == "exact" else 1, r["call_site"]))
         downstream_relations.sort(key=lambda r: (r["depth"], 0 if r["confidence"] == "exact" else 1, r["call_site"]))
 
         # Build sorted, windowed, budget-constrained `files_to_read`
         sorted_nodes = sorted(
-            [n for n in nodes_by_id.values() if n.kind not in ("file", "event")],
+            [n for n in nodes_by_id.values() if n.kind not in ("file", "event", "contract")],
             key=lambda n: (
                 node_min_depth.get(n.id, 99),
                 0 if node_best_conf.get(n.id) == "exact" else 1,
@@ -1236,6 +1400,7 @@ class CodeGraphDB:
             "upstream": upstream_relations,
             "downstream": downstream_relations,
             "events": events_involved,
+            "cross_language_contracts": cross_language_contracts,
             "files_to_read": files_to_read,
             "total_context_lines": cumulative_lines,
             "omitted_locations": omitted_locations,
@@ -1458,4 +1623,123 @@ class CodeGraphDB:
             "top_directories": dict(dir_counter.most_common(8)),
             "godot_autoloads": autoloads,
             "last_indexed_at": last_indexed_ts,
+            "telemetry": self.get_telemetry_summary(),
+        }
+
+    # -------------------------------------------------------------------------
+    # Token Savings Telemetry (`usage_telemetry`)
+    # -------------------------------------------------------------------------
+
+    def record_telemetry(
+        self,
+        tool_name: str,
+        target: str,
+        output_text: str,
+        candidate_files: set[str] | list[str],
+    ) -> dict[str, int | float]:
+        """
+        Calculate and persist direct token savings for a tool call:
+          - `returned_tokens`: estimated tokens of the surgical response (`len(output_text) // 4`)
+          - `raw_files_tokens`: total tokens of the unique source files touched (`sum(file_bytes) // 4`)
+          - `saved_tokens`: `max(0, raw_files_tokens - returned_tokens)`
+        """
+        returned_tokens = max(1, len(output_text) // 4)
+        uniq_files = {fp for fp in candidate_files if fp and not fp.startswith(("event::", "contract::", "i18n::"))}
+        raw_bytes = 0
+        for rel_fp in uniq_files:
+            full_p = self.project_root / rel_fp
+            try:
+                if full_p.is_file():
+                    raw_bytes += full_p.stat().st_size
+            except OSError:
+                pass
+        raw_files_tokens = max(returned_tokens, raw_bytes // 4)
+        saved_tokens = max(0, raw_files_tokens - returned_tokens)
+        pct = round((saved_tokens / raw_files_tokens) * 100, 1) if raw_files_tokens > 0 else 0.0
+
+        try:
+            with self.conn:
+                self.conn.execute(
+                    """
+                    INSERT INTO usage_telemetry
+                    (timestamp, tool_name, target, returned_tokens, raw_files_tokens, saved_tokens, files_touched)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        time.time(),
+                        tool_name,
+                        target[:120],
+                        returned_tokens,
+                        raw_files_tokens,
+                        saved_tokens,
+                        len(uniq_files),
+                    ),
+                )
+        except sqlite3.OperationalError:
+            pass
+
+        return {
+            "returned_tokens": returned_tokens,
+            "raw_files_tokens": raw_files_tokens,
+            "saved_tokens": saved_tokens,
+            "savings_percent": pct,
+            "files_touched": len(uniq_files),
+        }
+
+    def get_telemetry_summary(self, reset: bool = False) -> dict[str, Any]:
+        """Aggregate cumulative token savings across all recorded MCP/CLI calls."""
+        if reset:
+            with self.conn:
+                self.conn.execute("DELETE FROM usage_telemetry")
+
+        tot_row = self.conn.execute(
+            """
+            SELECT COUNT(*) as calls,
+                   COALESCE(SUM(returned_tokens), 0) as ret_tok,
+                   COALESCE(SUM(raw_files_tokens), 0) as raw_tok,
+                   COALESCE(SUM(saved_tokens), 0) as sav_tok,
+                   COALESCE(SUM(files_touched), 0) as f_cnt
+            FROM usage_telemetry
+            """
+        ).fetchone()
+
+        calls = int(tot_row["calls"]) if tot_row else 0
+        ret_tok = int(tot_row["ret_tok"]) if tot_row else 0
+        raw_tok = int(tot_row["raw_tok"]) if tot_row else 0
+        sav_tok = int(tot_row["sav_tok"]) if tot_row else 0
+        pct = round((sav_tok / raw_tok) * 100, 1) if raw_tok > 0 else 0.0
+
+        by_tool_rows = self.conn.execute(
+            """
+            SELECT tool_name,
+                   COUNT(*) as calls,
+                   SUM(returned_tokens) as ret_tok,
+                   SUM(raw_files_tokens) as raw_tok,
+                   SUM(saved_tokens) as sav_tok
+            FROM usage_telemetry
+            GROUP BY tool_name
+            ORDER BY sav_tok DESC
+            """
+        ).fetchall()
+
+        by_tool = []
+        for r in by_tool_rows:
+            rt = int(r["raw_tok"] or 0)
+            st = int(r["sav_tok"] or 0)
+            by_tool.append({
+                "tool": r["tool_name"],
+                "calls": int(r["calls"]),
+                "returned_tokens": int(r["ret_tok"] or 0),
+                "raw_files_tokens": rt,
+                "saved_tokens": st,
+                "savings_percent": round((st / rt) * 100, 1) if rt > 0 else 0.0,
+            })
+
+        return {
+            "total_calls": calls,
+            "total_returned_tokens": ret_tok,
+            "total_raw_files_tokens": raw_tok,
+            "total_saved_tokens": sav_tok,
+            "overall_savings_percent": pct,
+            "by_tool": by_tool,
         }

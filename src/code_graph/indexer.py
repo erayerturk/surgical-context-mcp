@@ -13,6 +13,7 @@ from .db import CodeGraphDB
 from .models import IndexStats, ParseResult
 from .parser import (
     EXTENSION_TO_LANGUAGE,
+    SKIPPED_JSON_FILENAMES,
     ASTAnalyzer,
     parse_go_modules,
     parse_godot_autoloads,
@@ -156,6 +157,8 @@ class ProjectIndexer:
             dirs[:] = kept_dirs
 
             for fname in files:
+                if fname in SKIPPED_JSON_FILENAMES:
+                    continue
                 ext = Path(fname).suffix.lower()
                 if ext not in EXTENSION_TO_LANGUAGE:
                     continue
@@ -168,6 +171,8 @@ class ProjectIndexer:
                 try:
                     st = full_path.stat()
                 except OSError:
+                    continue
+                if ext == ".json" and st.st_size > 2_000_000:
                     continue
 
                 discovered_files.add(rel_path)
