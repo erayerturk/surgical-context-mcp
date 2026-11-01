@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "surgical-context-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local Tree-sitter code knowledge graph & MCP server that gives Claude Code, Cursor and other AI coding agents surgical edit context — cutting token usage by 80-95%."
 readme = "README.md"
 requires-python = ">=3.10"
