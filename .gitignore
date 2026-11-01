@@ -1,0 +1,12 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.DS_Store
+.code_graph.sqlite*
+GRAPH_REPORT.md
+.claude/settings.local.json
+.pytest_cache/
