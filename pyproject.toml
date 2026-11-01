@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "code-graph-mcp"
+name = "surgical-context-mcp"
 version = "0.1.0"
 description = "Local Tree-sitter code knowledge graph & MCP server that gives Claude Code, Cursor and other AI coding agents surgical edit context — cutting token usage by 80-95%."
 readme = "README.md"
@@ -35,13 +35,13 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/erayerturk/code-graph-mcp"
-Repository = "https://github.com/erayerturk/code-graph-mcp"
-Issues = "https://github.com/erayerturk/code-graph-mcp/issues"
+Homepage = "https://github.com/erayerturk/surgical-context-mcp"
+Repository = "https://github.com/erayerturk/surgical-context-mcp"
+Issues = "https://github.com/erayerturk/surgical-context-mcp/issues"
 
 [project.scripts]
 code-graph = "code_graph.cli:main"
-code-graph-mcp = "code_graph.mcp_server:run_server"
+surgical-context-mcp = "code_graph.mcp_server:run_server"
 
 [tool.setuptools.packages.find]
 where = ["src"]

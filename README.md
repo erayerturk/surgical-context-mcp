@@ -1,19 +1,28 @@
-# `code-graph-mcp` — Surgical AST Code Context & Knowledge Graph for AI Coding Agents
+# `surgical-context-mcp` — Surgical AST Code Context & Knowledge Graph for AI Coding Agents
 
+<!-- mcp-name: io.github.erayerturk/surgical-context-mcp -->
+
+[![PyPI](https://img.shields.io/pypi/v/surgical-context-mcp.svg)](https://pypi.org/project/surgical-context-mcp/)
+[![CI](https://github.com/erayerturk/surgical-context-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/erayerturk/surgical-context-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![MCP Server](https://img.shields.io/badge/MCP-server-8A2BE2.svg)](https://modelcontextprotocol.io)
 [![Claude Code](https://img.shields.io/badge/works%20with-Claude%20Code%20%7C%20Cursor%20%7C%20Windsurf%20%7C%20Cline-orange.svg)](#how-to-use-step-by-step-setup-guide)
-[![GitHub stars](https://img.shields.io/github/stars/erayerturk/code-graph-mcp?style=social)](https://github.com/erayerturk/code-graph-mcp/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/erayerturk/surgical-context-mcp?style=social)](https://github.com/erayerturk/surgical-context-mcp/stargazers)
 
 > **Stop feeding 3,000-line files into your LLM context window.**
-> `code-graph-mcp` is a zero-LLM-cost, embedded SQLite + Tree-sitter Code Knowledge Graph and MCP Server that gives AI coding agents (**Claude Code, Cursor, Windsurf, Cline, Claude Desktop**) the **exact surgical context** they need to edit, refactor, and navigate codebases safely — cutting token consumption by **80–95%** without sacrificing code quality.
+> `surgical-context-mcp` is a zero-LLM-cost, embedded SQLite + Tree-sitter Code Knowledge Graph and MCP Server that gives AI coding agents (**Claude Code, Cursor, Windsurf, Cline, Claude Desktop**) the **exact surgical context** they need to edit, refactor, and navigate codebases safely — cutting token consumption by **80–95%** without sacrificing code quality.
+
+<p align="center">
+  <img src="assets/demo.gif" alt="surgical-context-mcp demo: get_edit_context returns ~3.6k tokens instead of a 13k-token full file read" width="900">
+  <br><sub>Real run on this repo: editing a function in a 1,264-line file costs <b>~3.7k tokens</b> instead of <b>~13.3k</b> (−72%) — and you still get the skeleton, callers and helpers.</sub>
+</p>
 
 ---
 
 ## Table of Contents
 
-1. [Why Use `code-graph-mcp`?](#why-use-code-graph-mcp)
+1. [Why Use `surgical-context-mcp`?](#why-use-surgical-context-mcp)
 2. [How Much Does It Save & When Should You Use It?](#how-much-does-it-save--when-should-you-use-it)
 3. [Supported Languages & Ecosystem Resolvers](#supported-languages--ecosystem-resolvers)
 4. [How It Works (Architecture)](#how-it-works-architecture)
@@ -26,7 +35,7 @@
 
 ---
 
-## Why Use `code-graph-mcp`?
+## Why Use `surgical-context-mcp`?
 
 ### The 3 Core Problems with AI Coding Agents Today
 
@@ -41,7 +50,7 @@
 3. **Pure Static AST Graphs Miss Dynamic Dispatch & Scene/Template Wiring:**
    Standard call graphs only see static `foo()` calls. If a function is invoked via `getattr(obj, "foo")` in Python, `call("foo")` or a `.tscn` signal connection in Godot, `SendMessage("foo")` in Unity/C#, or referenced in a `.vue`/`.html`/`.proto` file, a naive graph reports *"0 callers — safe to delete"*, breaking production code.
 
-### How `code-graph-mcp` Solves All Three
+### How `surgical-context-mcp` Solves All Three
 
 - **`get_edit_context(symbol)` — One Call Before Any Edit:**
   Instead of reading a 2,500-line file, the agent makes **one** MCP call (`get_edit_context`) and receives a strictly budgeted (`≤ 4,000` tokens) surgical package containing:
@@ -66,12 +75,12 @@
 
 In agentic coding tools (Claude Code, Cursor, Cline), **every tool call re-sends the entire conversation history** up to that point. When an agent reads a 2,500-line file (`~22,000` tokens) on Turn 2 of a 12-turn coding task, those `22,000` tokens are billed on Turn 2, Turn 3, Turn 4 ... all the way to Turn 12 (`22,000 × 10 = 220,000` cumulative context tokens).
 
-By replacing full-file reads with `get_edit_context` (`~2,500–3,500` tokens), `code-graph-mcp` prevents context bloat from compounding across turns.
+By replacing full-file reads with `get_edit_context` (`~2,500–3,500` tokens), `surgical-context-mcp` prevents context bloat from compounding across turns.
 
 #### Benchmark Across Common Developer Tasks
 *(Measured on a 593-file multi-language repository: 2,607-line Godot client controller + Go backend + JS web dashboard)*
 
-| Developer Scenario | Standard Agent (`Read` + `Grep`) | With `code-graph-mcp` | Direct Token Savings | 10-Turn Compounded Savings |
+| Developer Scenario | Standard Agent (`Read` + `Grep`) | With `surgical-context-mcp` | Direct Token Savings | 10-Turn Compounded Savings |
 | :--- | :--- | :--- | :--- | :--- |
 | **1. Initial Repo Orientation** ("How is this codebase structured?") | `~18,500` tokens (multiple `ls`, `Glob`, `Read` calls) | **`~650` tokens** (`GRAPH_REPORT.md` / `get_architecture_map`) | **96% fewer tokens** | **~178,000 tokens saved** |
 | **2. Modifying a Function in a Large File** (`2,607` lines) | `~22,400` tokens (reads whole target file + 1 caller file) | **`~2,900` tokens** (`get_edit_context` returns skeleton + body + callers) | **87% fewer tokens** | **~195,000 tokens saved** |
@@ -81,7 +90,7 @@ By replacing full-file reads with `get_edit_context` (`~2,500–3,500` tokens), 
 
 ---
 
-### 2. When Does `code-graph-mcp` Provide the Biggest Gains?
+### 2. When Does `surgical-context-mcp` Provide the Biggest Gains?
 
 #### High-Impact Scenarios (80%–97% Savings & Higher Code Accuracy)
 - **Large or Monolithic Source Files (`300` to `5,000+` lines):**
@@ -97,7 +106,7 @@ By replacing full-file reads with `get_edit_context` (`~2,500–3,500` tokens), 
 
 #### When Are Savings Smaller? (Full Transparency)
 - **Small Files (`< 300` lines):**
-  If a file is only 150 lines long, slicing it into a skeleton + body is unnecessary overhead. `code-graph-mcp` detects this automatically: **for files `< 300` lines, `get_edit_context` returns the full numbered file directly.**
+  If a file is only 150 lines long, slicing it into a skeleton + body is unnecessary overhead. `surgical-context-mcp` detects this automatically: **for files `< 300` lines, `get_edit_context` returns the full numbered file directly.**
 - **Pure Test-Runner / Compiler Output Loops:**
   If a subagent spends 20 minutes running `go test ./...` or `pytest` in a loop and reading 5,000 lines of stack traces from terminal `stdout`, those tokens come from bash test output rather than source-file reads.
 - **Greenfield Scaffolding (0 existing files):**
@@ -107,7 +116,7 @@ By replacing full-file reads with `get_edit_context` (`~2,500–3,500` tokens), 
 
 ## Supported Languages & Ecosystem Resolvers
 
-`code-graph-mcp` strictly isolates language families (so a method in JavaScript or Go never collides with a method of the same name in Python or GDScript) and parses real ecosystem configuration files to resolve cross-file imports with `exact` confidence:
+`surgical-context-mcp` strictly isolates language families (so a method in JavaScript or Go never collides with a method of the same name in Python or GDScript) and parses real ecosystem configuration files to resolve cross-file imports with `exact` confidence:
 
 | Language / Ecosystem | File Extensions | Extracted Skeleton & Symbols | Ecosystem Config & Import Resolution |
 | :--- | :--- | :--- | :--- |
@@ -130,7 +139,7 @@ flowchart LR
         Configs["Ecosystem Configs\n(tsconfig.json, go.mod, project.godot)"]
     end
 
-    subgraph Engine["code-graph-mcp (Local, Zero-LLM)"]
+    subgraph Engine["surgical-context-mcp (Local, Zero-LLM)"]
         Scanner["Incremental Scanner\n(mtime + SHA-1 + .gitignore)"]
         Parser["Tree-sitter Polyglot AST\n+ Config Resolver"]
         DB[(".code_graph.sqlite\nNodes & Scoped Edges")]
@@ -166,21 +175,35 @@ Every relationship in `.code_graph.sqlite` is tagged with one of three confidenc
 - **Python 3.10 – 3.13** (Python 3.12 recommended)
 - macOS, Linux, or Windows
 
+### Quick Install (recommended)
+
+```bash
+# with uv (fastest)
+uv tool install surgical-context-mcp
+
+# or with pipx
+pipx install surgical-context-mcp
+
+# or plain pip
+pip install surgical-context-mcp
+```
+
+This puts two commands on your `PATH`: `code-graph` (CLI + MCP server) and `surgical-context-mcp` (MCP server shortcut).
+
+```bash
+code-graph --help
+```
+
+> Prefer a persistent install (`uv tool` / `pipx` / `pip`) over one-off `uvx` runs: `install-hooks` writes the absolute path of the `code-graph` binary into your Claude Code settings, so it must not live in a temporary cache.
+
 ### Install from Source
 
 ```bash
-git clone https://github.com/erayerturk/code-graph-mcp.git
-cd code-graph-mcp
-
+git clone https://github.com/erayerturk/surgical-context-mcp.git
+cd surgical-context-mcp
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e .
-```
-
-Verify the CLI is working:
-
-```bash
-.venv/bin/code-graph --help
 ```
 
 ---
@@ -193,17 +216,17 @@ Verify the CLI is working:
 Run this once to register `code-graph` globally in Claude Code:
 
 ```bash
-claude mcp add code-graph -- /absolute/path/to/code-graph-mcp/.venv/bin/code-graph serve
+claude mcp add code-graph -- code-graph serve
 ```
 
 #### Option B: Cursor / Windsurf / Claude Desktop (`.mcp.json` or `claude_desktop_config.json`)
-Add the following to your `.mcp.json` (project root) or global MCP settings file:
+Add the following to your `.mcp.json` (project root) or global MCP settings file (if your editor doesn't inherit your shell `PATH`, use the absolute path from `which code-graph`):
 
 ```json
 {
   "mcpServers": {
     "code-graph": {
-      "command": "/absolute/path/to/code-graph-mcp/.venv/bin/code-graph",
+      "command": "code-graph",
       "args": ["serve"]
     }
   }
@@ -217,7 +240,7 @@ Add the following to your `.mcp.json` (project root) or global MCP settings file
 Run `install-hooks` on any project repository you want to work on:
 
 ```bash
-/absolute/path/to/code-graph-mcp/.venv/bin/code-graph install-hooks /path/to/your/project
+code-graph install-hooks /path/to/your/project
 ```
 
 **What this command does automatically:**
@@ -261,7 +284,7 @@ Once configured, you don't need to run manual commands — your AI agent will au
 
 Command:
 ```bash
-code-graph edit-context build_edit_context -p /path/to/code-graph-mcp
+code-graph edit-context build_edit_context -p /path/to/surgical-context-mcp
 ```
 
 Output (abbreviated):
@@ -420,7 +443,7 @@ Paste this section into your project's `CLAUDE.md`, `AGENTS.md`, or `.cursorrule
 
 ## Custom Ignore Rules (`.codegraphignore`)
 
-By default, `code-graph-mcp` automatically respects:
+By default, `surgical-context-mcp` automatically respects:
 - Root and nested `.gitignore` files
 - Nested git worktrees / submodules (any subdirectory containing its own `.git`)
 - Built-in ignored directories (`.git`, `.claude`, `.aider*`, `.venv`, `venv`, `node_modules`, `dist`, `build`, `target`, `vendor`, `.next`, `.godot`, `Library`, `Temp`, `Binaries`, etc.)
@@ -447,11 +470,11 @@ fixtures/large_dumps/
 
 ## Acknowledgements
 
-The `GRAPH_REPORT.md` / "God Nodes" architecture-summary idea was inspired by [graphify](https://github.com/Graphify-Labs/graphify). `code-graph-mcp` is an independent implementation with a different focus: per-edit surgical context (`get_edit_context`), refactor safety checks (`check_rename_or_delete`), and a `PreToolUse` hook that keeps agents off full-file reads.
+The `GRAPH_REPORT.md` / "God Nodes" architecture-summary idea was inspired by [graphify](https://github.com/Graphify-Labs/graphify). `surgical-context-mcp` is an independent implementation with a different focus: per-edit surgical context (`get_edit_context`), refactor safety checks (`check_rename_or_delete`), and a `PreToolUse` hook that keeps agents off full-file reads.
 
 ## Contributing
 
-Issues and PRs are welcome — especially new language resolvers and real-world token benchmarks. If `code-graph-mcp` saves you tokens, a ⭐ helps others find it.
+Issues and PRs are welcome — especially new language resolvers and real-world token benchmarks. If `surgical-context-mcp` saves you tokens, a ⭐ helps others find it.
 
 ## License
 
